@@ -1,7 +1,6 @@
 const app = document.getElementById("app");
 
 const CONDITION_KEY = "hci_reader_condition";
-const LOGS_KEY = "hci_reader_logs";
 const THEME_KEY = "hci_reader_theme";
 const VALID_CONDITIONS = ["A", "B", "C", "D"];
 const VALID_THEMES = ["light", "dark"];
@@ -107,33 +106,6 @@ function bindThemeToggle() {
   });
 }
 
-function readLogs() {
-  try {
-    const raw = localStorage.getItem(LOGS_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeLogs(logs) {
-  localStorage.setItem(LOGS_KEY, JSON.stringify(logs));
-}
-
-function appendLog(record) {
-  const logs = readLogs();
-  logs.push(record);
-  writeLogs(logs);
-}
-
-function clearLogs() {
-  writeLogs([]);
-}
-
 function routeFromHash() {
   const hash = window.location.hash;
   if (!hash || hash === "#" || hash === "#/") {
@@ -191,7 +163,6 @@ function renderError(title, message) {
 
 function renderList(files) {
   const current = getCondition();
-  const logsCount = readLogs().length;
 
   const items =
     files.length === 0
@@ -222,11 +193,6 @@ function renderList(files) {
       <p class="muted">현재 선택: 조건 ${current}</p>
     </fieldset>
 
-    <div class="actions">
-      <button class="button" type="button" id="download-logs">로그 다운로드 (${logsCount})</button>
-      <button class="button" type="button" id="clear-logs">로그 초기화</button>
-    </div>
-
     ${items}
   `,
     {
@@ -243,32 +209,6 @@ function renderList(files) {
       renderList(files);
     });
   });
-
-  const downloadButton = app.querySelector("#download-logs");
-  const clearButton = app.querySelector("#clear-logs");
-
-  if (downloadButton) {
-    downloadButton.addEventListener("click", () => {
-      const payload = JSON.stringify(readLogs(), null, 2);
-      const blob = new Blob([payload], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      const stamp = new Date().toISOString().replaceAll(":", "-");
-      a.href = url;
-      a.download = `hci-reader-logs-${stamp}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    });
-  }
-
-  if (clearButton) {
-    clearButton.addEventListener("click", () => {
-      clearLogs();
-      renderList(files);
-    });
-  }
 }
 
 function getCaretRangeFromPoint(x, y) {
@@ -361,55 +301,12 @@ function renderReader(name, content, condition) {
 
   readerText.textContent = content;
 
-  const session = {
-    sessionId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    condition,
-    file: name,
-    startAt: new Date().toISOString(),
-    mouseMoveCount: 0,
-    arrowUpCount: 0,
-    arrowDownCount: 0,
-    scrollAttemptBlockedCount: 0,
-    ended: false,
-  };
-
   const lineState = {
     anchorX: null,
     lastClientY: null,
     contentTop: null,
     lineHeight: estimateLineHeight(readerText),
   };
-
-  function finalizeSession() {
-    if (session.ended) {
-      return;
-    }
-    session.ended = true;
-
-    const endAt = new Date().toISOString();
-    const durationMs = Math.max(0, Date.parse(endAt) - Date.parse(session.startAt));
-
-    const record = {
-      sessionId: session.sessionId,
-      condition: session.condition,
-      file: session.file,
-      startAt: session.startAt,
-      endAt,
-      durationMs,
-    };
-
-    if (session.condition === "B" || session.condition === "C") {
-      record.mouseMoveCount = session.mouseMoveCount;
-    }
-
-    if (session.condition === "D") {
-      record.arrowUpCount = session.arrowUpCount;
-      record.arrowDownCount = session.arrowDownCount;
-      record.scrollAttemptBlockedCount = session.scrollAttemptBlockedCount;
-    }
-
-    appendLog(record);
-  }
 
   function hideHighlight() {
     lineOverlay.style.display = "none";
@@ -711,7 +608,6 @@ function renderReader(name, content, condition) {
 
   if (condition === "B" || condition === "C") {
     const onMove = (event) => {
-      session.mouseMoveCount += 1;
       updateHighlightFromPoint(event.clientX, event.clientY);
     };
 
@@ -721,27 +617,23 @@ function renderReader(name, content, condition) {
     const onKeyDown = (event) => {
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        session.arrowUpCount += 1;
         stepByArrow(-1);
         return;
       }
 
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        session.arrowDownCount += 1;
         stepByArrow(1);
         return;
       }
 
       if (event.key === " " || event.key === "PageUp" || event.key === "PageDown") {
         event.preventDefault();
-        session.scrollAttemptBlockedCount += 1;
       }
     };
 
     const onWheel = (event) => {
       event.preventDefault();
-      session.scrollAttemptBlockedCount += 1;
     };
 
     readerScroll.addEventListener("keydown", onKeyDown);
@@ -760,15 +652,7 @@ function renderReader(name, content, condition) {
     hideHighlight();
   }
 
-  const onBeforeUnload = () => {
-    finalizeSession();
-  };
-
-  window.addEventListener("beforeunload", onBeforeUnload);
-  cleanups.push(() => window.removeEventListener("beforeunload", onBeforeUnload));
-
   state.readerCleanup = () => {
-    finalizeSession();
     cleanups.forEach((fn) => fn());
   };
 }
