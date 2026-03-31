@@ -996,20 +996,7 @@ function createStudySession({ participantId, groupId }) {
       arrowUpKeydowns: 0,
       arrowDownKeydowns: 0,
     },
-    quiz: {
-      view: "quiz",
-      startedAt: null,
-      submittedAt: null,
-      answers: {},
-      totalQuestions: 0,
-      correctCount: 0,
-      accuracy: 0,
-      problemSolvingTimeSec: 0,
-      revisitCount: 0,
-      firstRevisitAt: null,
-      firstRevisitToSubmitSec: "",
-      researchAccuracy: 0,
-    },
+    quiz: createQuizState(),
     likert: {
       responses: LIKERT_ITEMS.map(() => ({ score: null, reason: "" })),
       completedAt: null,
@@ -1165,6 +1152,247 @@ function formatDateTimeDisplay(iso) {
     return String(iso);
   }
   return parsed.toLocaleString();
+}
+
+function createQuestionMetricState() {
+  return {
+    enteredAt: null,
+    accumulatedQuizTimeSec: 0,
+    accumulatedTextTimeSec: 0,
+    textVisitCount: 0,
+    visitedText: false,
+    answerChanges: 0,
+    selectedOptionId: "",
+    lastAnsweredAt: null,
+    lastLeftQuizAt: null,
+    lastLeftTextAt: null,
+    isCorrect: null,
+  };
+}
+
+function createQuizState() {
+  return {
+    view: "quiz",
+    startedAt: null,
+    submittedAt: null,
+    answers: {},
+    totalQuestions: 0,
+    correctCount: 0,
+    accuracy: 0,
+    problemSolvingTimeSec: 0,
+    revisitCount: 0,
+    firstRevisitAt: null,
+    firstRevisitToSubmitSec: "",
+    researchAccuracy: 0,
+    currentQuestionIndex: 0,
+    questionOrder: [],
+    questionMetrics: {},
+    activeQuestionId: "",
+    activeViewStartedAt: null,
+    stageTextRevisitCount: 0,
+    stageTextRevisitQuestions: [],
+  };
+}
+
+function ensureQuizStateStructure(quizState, quizEntry) {
+  const base = createQuizState();
+  let dirty = false;
+
+  Object.entries(base).forEach(([key, defaultValue]) => {
+    if (quizState[key] == null || (Array.isArray(defaultValue) && !Array.isArray(quizState[key]))) {
+      quizState[key] = Array.isArray(defaultValue) ? [...defaultValue] : typeof defaultValue === "object" ? { ...defaultValue } : defaultValue;
+      dirty = true;
+    }
+  });
+
+  if (!quizState.answers || typeof quizState.answers !== "object" || Array.isArray(quizState.answers)) {
+    quizState.answers = {};
+    dirty = true;
+  }
+
+  if (!quizState.questionMetrics || typeof quizState.questionMetrics !== "object" || Array.isArray(quizState.questionMetrics)) {
+    quizState.questionMetrics = {};
+    dirty = true;
+  }
+
+  const questions = Array.isArray(quizEntry?.questions) ? quizEntry.questions : [];
+  const questionOrder = questions.map((question) => question.id);
+  if (JSON.stringify(quizState.questionOrder) !== JSON.stringify(questionOrder)) {
+    quizState.questionOrder = questionOrder;
+    dirty = true;
+  }
+
+  questions.forEach((question) => {
+    const metric = quizState.questionMetrics[question.id];
+    if (!metric || typeof metric !== "object" || Array.isArray(metric)) {
+      quizState.questionMetrics[question.id] = createQuestionMetricState();
+      dirty = true;
+    } else {
+      const baseMetric = createQuestionMetricState();
+      Object.entries(baseMetric).forEach(([key, defaultValue]) => {
+        if (metric[key] == null) {
+          metric[key] = defaultValue;
+          dirty = true;
+        }
+      });
+    }
+
+    const metricState = quizState.questionMetrics[question.id];
+    if (metricState.selectedOptionId && !quizState.answers[question.id]) {
+      quizState.answers[question.id] = metricState.selectedOptionId;
+      dirty = true;
+    } else if (quizState.answers[question.id] && !metricState.selectedOptionId) {
+      metricState.selectedOptionId = quizState.answers[question.id];
+      dirty = true;
+    }
+  });
+
+  const maxIndex = Math.max(questions.length, 0);
+  const nextIndex = Math.min(maxIndex, Math.max(0, Number(quizState.currentQuestionIndex || 0)));
+  if (quizState.currentQuestionIndex !== nextIndex) {
+    quizState.currentQuestionIndex = nextIndex;
+    dirty = true;
+  }
+
+  if (quizState.view !== "quiz" && quizState.view !== "text") {
+    quizState.view = "quiz";
+    dirty = true;
+  }
+
+  if (!Array.isArray(quizState.stageTextRevisitQuestions)) {
+    quizState.stageTextRevisitQuestions = [];
+    dirty = true;
+  }
+
+  return dirty;
+}
+
+function finalizeQuizActiveSegment(quizState, atIso = nowIso()) {
+  const questionId = quizState.activeQuestionId;
+  const startedAt = quizState.activeViewStartedAt;
+  if (!questionId || !startedAt) {
+    return false;
+  }
+
+  const metric = quizState.questionMetrics[questionId] || (quizState.questionMetrics[questionId] = createQuestionMetricState());
+  const deltaSec = diffSeconds(startedAt, atIso);
+
+  if (quizState.view === "text") {
+    metric.accumulatedTextTimeSec = sanitizeNumeric(Number(metric.accumulatedTextTimeSec || 0) + deltaSec, 3);
+    metric.lastLeftTextAt = atIso;
+  } else {
+    metric.accumulatedQuizTimeSec = sanitizeNumeric(Number(metric.accumulatedQuizTimeSec || 0) + deltaSec, 3);
+    metric.lastLeftQuizAt = atIso;
+  }
+
+  quizState.activeViewStartedAt = null;
+  return true;
+}
+
+function activateQuizView(quizState, questionId, view, atIso = nowIso()) {
+  const metric = quizState.questionMetrics[questionId] || (quizState.questionMetrics[questionId] = createQuestionMetricState());
+  if (!metric.enteredAt) {
+    metric.enteredAt = atIso;
+  }
+  quizState.activeQuestionId = questionId;
+  quizState.activeViewStartedAt = atIso;
+  quizState.view = view;
+}
+
+function animateQuizPageExit(direction, onComplete) {
+  const page = app.querySelector(".quiz-page");
+  const currentDot = app.querySelector(".quiz-progress-dot.is-current");
+  if (!page) {
+    onComplete();
+    return;
+  }
+
+  const offset = direction === "next" ? -48 : 48;
+  let finished = false;
+  const finishOnce = () => {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    onComplete();
+  };
+
+  page
+    .animate(
+      [
+        { transform: "translateX(0) scale(1)", opacity: 1, filter: "blur(0px)" },
+        { transform: `translateX(${offset}px) scale(0.985)`, opacity: 0, filter: "blur(4px)" },
+      ],
+      {
+        duration: 220,
+        easing: "cubic-bezier(0.4, 0, 0.2, 1)",
+        fill: "forwards",
+      }
+    )
+    .finished.then(finishOnce, finishOnce);
+
+  if (currentDot) {
+    currentDot.animate(
+      [
+        { transform: "translateX(0) scaleX(1) scaleY(1)" },
+        { transform: `translateX(${direction === "next" ? 5 : -5}px) scaleX(0.9) scaleY(0.96)` },
+      ],
+      {
+        duration: 160,
+        easing: "cubic-bezier(0.33, 1, 0.68, 1)",
+        fill: "forwards",
+      }
+    );
+  }
+}
+
+function runQuizPageEntryAnimation(direction) {
+  const page = app.querySelector(".quiz-page");
+  const indicator = app.querySelector(".quiz-indicator");
+  const currentDot = app.querySelector(".quiz-progress-dot.is-current");
+  if (!page) {
+    return;
+  }
+
+  const offset = direction === "next" ? 52 : -52;
+
+  page.animate(
+    [
+      { transform: `translateX(${offset}px) scale(0.985)`, opacity: 0, filter: "blur(4px)" },
+      { transform: "translateX(0) scale(1)", opacity: 1, filter: "blur(0px)" },
+    ],
+    {
+      duration: 320,
+      easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+    }
+  );
+
+  if (indicator) {
+    indicator.animate(
+      [
+        { transform: `translateX(${direction === "next" ? 4 : -4}px)` },
+        { transform: "translateX(0)" },
+      ],
+      {
+        duration: 240,
+        easing: "cubic-bezier(0.33, 1, 0.68, 1)",
+      }
+    );
+  }
+
+  if (currentDot) {
+    currentDot.animate(
+      [
+        { transform: `translateX(${direction === "next" ? -7 : 7}px) scaleX(0.82) scaleY(0.96)` },
+        { transform: "translateX(0) scaleX(1.16) scaleY(1)", offset: 0.68 },
+        { transform: "translateX(0) scaleX(1) scaleY(1)" },
+      ],
+      {
+        duration: 300,
+        easing: "cubic-bezier(0.33, 1, 0.68, 1)",
+      }
+    );
+  }
 }
 
 function markSessionCompleted(session) {
@@ -1354,88 +1582,167 @@ function renderStudyMainReading(session, stage, content) {
   }
 }
 
-function renderQuizQuestionCards(quizEntry, answers) {
-  return quizEntry.questions
-    .map((question, qIndex) => {
-      const selected = answers[question.id] || "";
-      const options = question.options
-        .map(
-          (option) => `
-          <label class="quiz-option">
-            <input type="radio" name="q_${escapeHtml(question.id)}" value="${escapeHtml(option.id)}" ${selected === option.id ? "checked" : ""}>
-            <span>${escapeHtml(option.id)}. ${escapeHtml(option.text)}</span>
-          </label>
-        `
-        )
-        .join("");
-
-      return `
-        <article class="quiz-card" data-question-id="${escapeHtml(question.id)}">
-          <h3>문제 ${qIndex + 1}</h3>
-          <p>${escapeHtml(question.prompt)}</p>
-          <div class="quiz-options">${options}</div>
-        </article>
-      `;
-    })
-    .join("");
-}
-
-function renderStudyQuiz(session, stage, content, quizEntry) {
+function renderStudyQuiz(session, stage, content, quizEntry, { transitionDirection = "" } = {}) {
   const quizState = stage.quiz;
+  const questions = Array.isArray(quizEntry.questions) ? quizEntry.questions : [];
+  const now = nowIso();
+  let needsPersist = ensureQuizStateStructure(quizState, quizEntry);
+
   if (!quizState.startedAt) {
-    quizState.startedAt = nowIso();
+    quizState.startedAt = now;
+    needsPersist = true;
+  }
+
+  if (!questions.length) {
+    renderError("퀴즈를 찾을 수 없습니다.", "현재 단계에 표시할 문제가 없습니다.");
+    return;
+  }
+
+  const currentIndex = Math.min(Math.max(0, Number(quizState.currentQuestionIndex || 0)), questions.length);
+  if (quizState.currentQuestionIndex !== currentIndex) {
+    quizState.currentQuestionIndex = currentIndex;
+    needsPersist = true;
+  }
+
+  const isCompletionPage = currentIndex === questions.length;
+  const currentQuestion = isCompletionPage ? null : questions[currentIndex];
+  if (!isCompletionPage) {
+    if (!quizState.activeQuestionId || !quizState.activeViewStartedAt || quizState.activeQuestionId !== currentQuestion.id) {
+      activateQuizView(quizState, currentQuestion.id, quizState.view === "text" ? "text" : "quiz", now);
+      needsPersist = true;
+    }
+  } else if (quizState.activeQuestionId || quizState.activeViewStartedAt) {
+    quizState.activeQuestionId = "";
+    quizState.activeViewStartedAt = null;
+    quizState.view = "quiz";
+    needsPersist = true;
+  }
+
+  if (needsPersist) {
     persistSession(session);
   }
 
   const view = quizState.view === "text" ? "text" : "quiz";
-  const quizTabClass = view === "quiz" ? "button button-primary" : "button";
-  const textTabClass = view === "text" ? "button button-primary" : "button";
+  const selected = currentQuestion
+    ? quizState.answers[currentQuestion.id] || quizState.questionMetrics[currentQuestion.id]?.selectedOptionId || ""
+    : "";
+  const isLastQuestion = currentIndex === questions.length - 1;
+
+  const optionHtml = currentQuestion
+    ? currentQuestion.options
+        .map(
+          (option) => `
+            <label class="quiz-choice">
+              <input type="radio" name="q_${escapeHtml(currentQuestion.id)}" value="${escapeHtml(option.id)}" ${
+                selected === option.id ? "checked" : ""
+              }>
+              <span class="quiz-choice-label">
+                <span class="quiz-choice-id">${escapeHtml(option.id)}</span>
+                <span class="quiz-choice-text">${escapeHtml(option.text)}</span>
+              </span>
+            </label>
+          `
+        )
+        .join("")
+    : "";
+
+  const indicatorHtml = questions
+    .map((question, index) => {
+      const answered = Boolean(quizState.answers[question.id]);
+      const className = [
+        "quiz-progress-dot",
+        index === currentIndex ? "is-current" : "",
+        answered ? "is-answered" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return `<span class="${className}" aria-hidden="true"></span>`;
+    })
+    .concat(
+      `<span class="quiz-progress-dot quiz-progress-finish ${isCompletionPage ? "is-current" : ""}" aria-hidden="true"></span>`
+    )
+    .join("");
 
   const bodyHtml =
     view === "quiz"
       ? `
-      <form id="quiz-form">
-        ${renderQuizQuestionCards(quizEntry, quizState.answers)}
-      </form>
-      <div class="study-next-wrap">
-        <button class="button button-primary next-button" id="quiz-submit">답안 제출</button>
-      </div>
-    `
+        <section class="quiz-layout">
+          <section class="quiz-shell">
+            <article class="quiz-page ${isCompletionPage ? "is-complete" : ""}" ${
+              currentQuestion ? `data-question-id="${escapeHtml(currentQuestion.id)}"` : ""
+            }>
+              ${
+                isCompletionPage
+                  ? `
+                    <div class="quiz-complete-content">
+                      <p class="quiz-page-kicker">문제 풀이 완료</p>
+                      <h2 class="quiz-complete-title">수고하셨습니다!</h2>
+                      <button class="button button-primary next-button" id="quiz-submit">다음 단계로</button>
+                    </div>
+                  `
+                  : `
+                    <div class="quiz-page-content">
+                      <div class="quiz-page-head">
+                        <p class="quiz-page-kicker">문제 ${currentIndex + 1}</p>
+                        <p class="quiz-page-prompt">${escapeHtml(currentQuestion.prompt)}</p>
+                      </div>
+                      <form id="quiz-form" class="quiz-choice-list">
+                        ${optionHtml}
+                      </form>
+                      <div class="quiz-page-footer">
+                        <button class="button quiz-inline-button" id="view-text">본문 보기</button>
+                      </div>
+                    </div>
+                  `
+              }
+            </article>
+
+            <div class="quiz-nav">
+              ${
+                currentIndex === 0
+                  ? '<div class="quiz-nav-spacer" aria-hidden="true"></div>'
+                  : '<button class="button quiz-nav-button" id="quiz-prev">이전</button>'
+              }
+              <div class="quiz-indicator" aria-label="문제 진행 상태">
+                ${indicatorHtml}
+              </div>
+              ${
+                isCompletionPage
+                  ? '<div class="quiz-nav-spacer" aria-hidden="true"></div>'
+                  : '<button class="button quiz-nav-button" id="quiz-next">다음</button>'
+              }
+            </div>
+          </section>
+        </section>
+      `
       : `
-      ${buildReaderBlock({
-        title: `본문 재확인: ${formatFilenameForDisplay(stage.textFile)}`,
-        content,
-        condition: stage.condition,
-        idPrefix: "quiz-text",
-      })}
-      <div class="study-next-wrap">
-        <button class="button button-primary next-button" id="back-to-quiz">문제로 돌아가기</button>
-      </div>
-    `;
+        <div class="study-meta">
+          <p class="muted">본문</p>
+        </div>
 
-  app.innerHTML = renderScreen(
-    `
-    <div class="study-meta">
-      <span class="badge">문제 풀이 (${escapeHtml(stage.taskId)})</span>
-      <p class="muted">필요하면 본문 보기로 이동해 다시 탐색할 수 있습니다.</p>
-    </div>
+        ${buildReaderBlock({
+          title: formatFilenameForDisplay(stage.textFile),
+          content,
+          condition: stage.condition,
+          idPrefix: "quiz-text",
+        })}
+        <div class="study-next-wrap">
+          <button class="button button-primary next-button" id="back-to-quiz">문제로 돌아가기</button>
+        </div>
+      `;
 
-    <div class="tab-buttons">
-      <button class="${quizTabClass}" id="view-quiz" ${view === "quiz" ? "disabled" : ""}>문제 보기</button>
-      <button class="${textTabClass}" id="view-text" ${view === "text" ? "disabled" : ""}>본문 보기</button>
-    </div>
-
-    ${bodyHtml}
-  `,
-    {
-      screenClass: view === "text" ? "reader-screen" : "list-screen",
-      leadingHtml: getStageLeadingHtml(session, stage),
-      showThemeToggle: false,
-    }
-  );
+  app.innerHTML = renderScreen(bodyHtml, {
+    screenClass: view === "text" ? "reader-screen" : "quiz-screen",
+    leadingHtml: getStageLeadingHtml(session, stage),
+    showThemeToggle: false,
+  });
 
   bindThemeToggle();
   teardownReaderSession();
+
+  if (view === "quiz" && transitionDirection) {
+    runQuizPageEntryAnimation(transitionDirection);
+  }
 
   if (view === "text") {
     state.readerCleanup = mountReader({
@@ -1445,33 +1752,132 @@ function renderStudyQuiz(session, stage, content, quizEntry) {
     });
   }
 
-  const switchToView = (nextView) => {
-    if (quizState.view === "quiz" && nextView === "text") {
-      quizState.revisitCount += 1;
-      if (!quizState.firstRevisitAt) {
-        quizState.firstRevisitAt = nowIso();
-      }
+  const switchToQuestion = (nextIndex) => {
+    const targetIndex = Math.min(Math.max(0, nextIndex), questions.length);
+    if (targetIndex === currentIndex) {
+      return;
     }
-    quizState.view = nextView;
+
+    const direction = targetIndex > currentIndex ? "next" : "prev";
+    const timestamp = nowIso();
+    finalizeQuizActiveSegment(quizState, timestamp);
+    quizState.currentQuestionIndex = targetIndex;
+    if (targetIndex < questions.length) {
+      activateQuizView(quizState, questions[targetIndex].id, "quiz", timestamp);
+    } else {
+      quizState.activeQuestionId = "";
+      quizState.activeViewStartedAt = null;
+      quizState.view = "quiz";
+    }
+    persistSession(session);
+    animateQuizPageExit(direction, () => {
+      renderStudyQuiz(session, stage, content, quizEntry, { transitionDirection: direction });
+    });
+  };
+
+  const switchToText = () => {
+    if (!currentQuestion) {
+      return;
+    }
+    const timestamp = nowIso();
+    const metric = quizState.questionMetrics[currentQuestion.id] || (quizState.questionMetrics[currentQuestion.id] = createQuestionMetricState());
+    finalizeQuizActiveSegment(quizState, timestamp);
+    metric.textVisitCount = Number(metric.textVisitCount || 0) + 1;
+    metric.visitedText = true;
+    quizState.stageTextRevisitCount = Number(quizState.stageTextRevisitCount || 0) + 1;
+    if (!quizState.stageTextRevisitQuestions.includes(currentQuestion.id)) {
+      quizState.stageTextRevisitQuestions.push(currentQuestion.id);
+    }
+    quizState.revisitCount = quizState.stageTextRevisitCount;
+    if (!quizState.firstRevisitAt) {
+      quizState.firstRevisitAt = timestamp;
+    }
+    activateQuizView(quizState, currentQuestion.id, "text", timestamp);
     persistSession(session);
     renderRoute();
   };
 
-  const viewQuizBtn = app.querySelector("#view-quiz");
-  const viewTextBtn = app.querySelector("#view-text");
+  const returnToQuiz = () => {
+    if (!currentQuestion) {
+      return;
+    }
+    const timestamp = nowIso();
+    finalizeQuizActiveSegment(quizState, timestamp);
+    activateQuizView(quizState, currentQuestion.id, "quiz", timestamp);
+    persistSession(session);
+    renderRoute();
+  };
 
-  if (viewQuizBtn) {
-    viewQuizBtn.addEventListener("click", () => switchToView("quiz"));
+  const recordAnswerChange = (nextValue) => {
+    if (!currentQuestion) {
+      return;
+    }
+    const metric = quizState.questionMetrics[currentQuestion.id] || (quizState.questionMetrics[currentQuestion.id] = createQuestionMetricState());
+    const previousValue = metric.selectedOptionId || quizState.answers[currentQuestion.id] || "";
+    if (previousValue && previousValue !== nextValue) {
+      metric.answerChanges = Number(metric.answerChanges || 0) + 1;
+    }
+    metric.selectedOptionId = nextValue;
+    metric.lastAnsweredAt = nowIso();
+    quizState.answers[currentQuestion.id] = nextValue;
+    persistSession(session);
+  };
+
+  const submitQuiz = () => {
+    const unanswered = questions.find((question) => !quizState.answers[question.id]);
+    if (unanswered) {
+      window.alert("모든 문항에 답변해 주세요.");
+      return;
+    }
+
+    const submittedAt = nowIso();
+    finalizeQuizActiveSegment(quizState, submittedAt);
+    quizState.submittedAt = submittedAt;
+    quizState.totalQuestions = questions.length;
+
+    let correctCount = 0;
+    questions.forEach((question) => {
+      const metric = quizState.questionMetrics[question.id] || (quizState.questionMetrics[question.id] = createQuestionMetricState());
+      const selectedOptionId = metric.selectedOptionId || quizState.answers[question.id] || "";
+      metric.selectedOptionId = selectedOptionId;
+      metric.isCorrect = selectedOptionId === question.correct_option_id;
+      if (metric.isCorrect) {
+        correctCount += 1;
+      }
+    });
+
+    const accuracy = questions.length > 0 ? correctCount / questions.length : 0;
+    quizState.correctCount = correctCount;
+    quizState.accuracy = sanitizeNumeric(accuracy);
+    quizState.researchAccuracy = sanitizeNumeric(accuracy);
+    quizState.problemSolvingTimeSec = diffSeconds(quizState.startedAt, submittedAt);
+    quizState.firstRevisitToSubmitSec = quizState.firstRevisitAt
+      ? diffSeconds(quizState.firstRevisitAt, submittedAt)
+      : "";
+
+    nextPhase(session);
+    persistSession(session);
+    renderRoute();
+  };
+
+  const prevBtn = app.querySelector("#quiz-prev");
+  if (prevBtn) {
+    prevBtn.addEventListener("click", () => switchToQuestion(currentIndex - 1));
   }
+
+  const nextBtn = app.querySelector("#quiz-next");
+  if (nextBtn) {
+    nextBtn.addEventListener("click", () => switchToQuestion(currentIndex + 1));
+  }
+
+  const viewTextBtn = app.querySelector("#view-text");
   if (viewTextBtn) {
-    viewTextBtn.addEventListener("click", () => switchToView("text"));
+    viewTextBtn.addEventListener("click", switchToText);
   }
 
   const backToQuizBtn = app.querySelector("#back-to-quiz");
   if (backToQuizBtn) {
-    backToQuizBtn.addEventListener("click", () => {
-      switchToView("quiz");
-    });
+    backToQuizBtn.addEventListener("click", returnToQuiz);
   }
 
   const quizForm = app.querySelector("#quiz-form");
@@ -1484,46 +1890,13 @@ function renderStudyQuiz(session, stage, content, quizEntry) {
       if (!target.name.startsWith("q_")) {
         return;
       }
-      const qid = target.name.slice(2);
-      quizState.answers[qid] = target.value;
-      persistSession(session);
+      recordAnswerChange(target.value);
     });
   }
 
   const submitBtn = app.querySelector("#quiz-submit");
   if (submitBtn) {
-    submitBtn.addEventListener("click", () => {
-      const questions = quizEntry.questions;
-      const unanswered = questions.find((q) => !quizState.answers[q.id]);
-      if (unanswered) {
-        window.alert("모든 문항에 답변해 주세요.");
-        return;
-      }
-
-      quizState.submittedAt = nowIso();
-      quizState.totalQuestions = questions.length;
-
-      let correctCount = 0;
-      questions.forEach((q) => {
-        if (quizState.answers[q.id] === q.correct_option_id) {
-          correctCount += 1;
-        }
-      });
-
-      const accuracy = questions.length > 0 ? correctCount / questions.length : 0;
-
-      quizState.correctCount = correctCount;
-      quizState.accuracy = sanitizeNumeric(accuracy);
-      quizState.researchAccuracy = sanitizeNumeric(accuracy);
-      quizState.problemSolvingTimeSec = diffSeconds(quizState.startedAt, quizState.submittedAt);
-      quizState.firstRevisitToSubmitSec = quizState.firstRevisitAt
-        ? diffSeconds(quizState.firstRevisitAt, quizState.submittedAt)
-        : "";
-
-      nextPhase(session);
-      persistSession(session);
-      renderRoute();
-    });
+    submitBtn.addEventListener("click", submitQuiz);
   }
 }
 
@@ -1772,9 +2145,30 @@ function sessionToWideRow(session) {
     row[`stage${n}_quiz_correct`] = Number(quiz.correctCount || 0);
     row[`stage${n}_accuracy`] = accuracy;
     row[`stage${n}_problem_solving_time_sec`] = sanitizeNumeric(Number(quiz.problemSolvingTimeSec || 0), 3);
-    row[`stage${n}_revisit_count`] = Number(quiz.revisitCount || 0);
+    row[`stage${n}_revisit_count`] = Number(quiz.stageTextRevisitCount || quiz.revisitCount || 0);
     row[`stage${n}_first_revisit_to_submit_sec`] = quiz.firstRevisitToSubmitSec === "" ? "" : sanitizeNumeric(Number(quiz.firstRevisitToSubmitSec || 0), 3);
     row[`stage${n}_research_accuracy`] = sanitizeNumeric(Number(quiz.researchAccuracy || 0));
+    row[`stage${n}_revisit_questions`] = Array.isArray(quiz.stageTextRevisitQuestions)
+      ? quiz.stageTextRevisitQuestions.join("|")
+      : "";
+
+    const questionOrder = Array.isArray(quiz.questionOrder) ? quiz.questionOrder : [];
+    questionOrder.forEach((questionId, questionIndex) => {
+      const metric = quiz.questionMetrics?.[questionId] || {};
+      const prefix = `stage${n}_q${questionIndex + 1}`;
+      row[`${prefix}_id`] = questionId;
+      row[`${prefix}_answer`] = metric.selectedOptionId || quiz.answers?.[questionId] || "";
+      row[`${prefix}_correct`] = metric.isCorrect == null ? "" : metric.isCorrect ? 1 : 0;
+      row[`${prefix}_quiz_time_sec`] = sanitizeNumeric(Number(metric.accumulatedQuizTimeSec || 0), 3);
+      row[`${prefix}_text_time_sec`] = sanitizeNumeric(Number(metric.accumulatedTextTimeSec || 0), 3);
+      row[`${prefix}_visited_text`] = metric.visitedText ? 1 : 0;
+      row[`${prefix}_text_visit_count`] = Number(metric.textVisitCount || 0);
+      row[`${prefix}_answer_changes`] = Number(metric.answerChanges || 0);
+      row[`${prefix}_entered_at`] = metric.enteredAt || "";
+      row[`${prefix}_last_answered_at`] = metric.lastAnsweredAt || "";
+      row[`${prefix}_last_left_quiz_at`] = metric.lastLeftQuizAt || "";
+      row[`${prefix}_last_left_text_at`] = metric.lastLeftTextAt || "";
+    });
 
     row[`stage${n}_comprehension_efficiency`] = computeComprehensionEfficiency(accuracy, Number(reading.readingTimeSec || 0));
 
