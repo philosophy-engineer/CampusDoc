@@ -179,6 +179,21 @@ function diffSeconds(startIso, endIso) {
   return Number(((end - start) / 1000).toFixed(3));
 }
 
+function formatDurationDisplay(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.round(Number(totalSeconds) || 0));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}시간 ${minutes}분 ${seconds}초`;
+  }
+  if (minutes > 0) {
+    return `${minutes}분 ${seconds}초`;
+  }
+  return `${seconds}초`;
+}
+
 function getCondition() {
   const raw = localStorage.getItem(CONDITION_KEY);
   return VALID_CONDITIONS.includes(raw) ? raw : "A";
@@ -2967,48 +2982,20 @@ function downloadCsv(filename, content) {
 }
 
 function renderCompletedStudy(session) {
-  const row = sessionToWideRow(session);
-  const records = loadStudyRecords();
-  const csvRows = records.length ? records : [row];
+  const totalDurationText = formatDurationDisplay(diffSeconds(session.startedAt, session.completedAt || nowIso()));
 
-  app.innerHTML = renderScreen(
-    `
-    <h1>스터디 완료</h1>
-    <p class="muted">참가자 ${escapeHtml(session.participantId)} · 그룹 ${escapeHtml(session.groupId)}의 스터디가 완료되었습니다.</p>
-
-    <div class="study-resume-box">
-      <p><strong>측정 요약</strong></p>
-      <p class="muted">단계 수: ${session.stages.length} / 완료 시각: ${escapeHtml(session.completedAt || "")}</p>
-    </div>
-
-    <div class="start-actions">
-      <button class="button button-primary" id="download-csv-btn">CSV 다운로드</button>
-      <a class="button" href="#/records">저장 데이터</a>
-      <a class="button" href="#/start">시작 화면으로</a>
-    </div>
-  `,
-    {
-      screenClass: "list-screen",
-      leadingHtml: `<span class="app-mark">그룹 ${escapeHtml(session.groupId)} · 완료</span>`,
-      showThemeToggle: false,
-    }
-  );
-
-  bindThemeToggle();
-
-  const downloadBtn = app.querySelector("#download-csv-btn");
-  if (downloadBtn) {
-    downloadBtn.addEventListener("click", () => {
-      const content = buildCsvFromRows(csvRows);
-      if (!content) {
-        window.alert("다운로드할 CSV 데이터가 없습니다.");
-        return;
-      }
-      const timestamp = new Date().toISOString().slice(0, 19).replaceAll(":", "-");
-      downloadCsv(`hci-study-results-${timestamp}.csv`, content);
-      incrementTotalDownloadCount({ bulk: true });
-    });
-  }
+  app.innerHTML = `
+    <section class="screen completed-screen">
+      <div class="completed-layout">
+        <div class="completed-message">
+          <h1 class="completed-title">끝입니다</h1>
+          <p class="completed-subtitle">${escapeHtml(session.participantId)}님 정말 수고 많으셨습니다!</p>
+          <p class="completed-duration">총 참여 시간 ${escapeHtml(totalDurationText)}</p>
+        </div>
+        <a class="button completed-home-button" href="#/start">시작으로</a>
+      </div>
+    </section>
+  `;
 }
 
 function renderRecordStageSummary(record) {
