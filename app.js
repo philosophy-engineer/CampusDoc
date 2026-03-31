@@ -997,10 +997,7 @@ function createStudySession({ participantId, groupId }) {
       arrowDownKeydowns: 0,
     },
     quiz: createQuizState(),
-    likert: {
-      responses: LIKERT_ITEMS.map(() => ({ score: null, reason: "" })),
-      completedAt: null,
-    },
+    likert: createLikertState(),
   }));
 
   return {
@@ -1170,6 +1167,19 @@ function createQuestionMetricState() {
   };
 }
 
+function createLikertState() {
+  return {
+    responses: LIKERT_ITEMS.map(() => ({ score: null, reason: "" })),
+    completedAt: null,
+    currentItemIndex: 0,
+  };
+}
+
+function isLikertScoreSelected(score) {
+  const numericScore = Number(score);
+  return Number.isInteger(numericScore) && numericScore >= 1 && numericScore <= 5;
+}
+
 function createQuizState() {
   return {
     view: "quiz",
@@ -1192,6 +1202,63 @@ function createQuizState() {
     stageTextRevisitCount: 0,
     stageTextRevisitQuestions: [],
   };
+}
+
+function ensureLikertStateStructure(likertState) {
+  const base = createLikertState();
+  let dirty = false;
+
+  Object.entries(base).forEach(([key, defaultValue]) => {
+    if (likertState[key] == null) {
+      likertState[key] = Array.isArray(defaultValue)
+        ? defaultValue.map((item) => ({ ...item }))
+        : typeof defaultValue === "object"
+          ? { ...defaultValue }
+          : defaultValue;
+      dirty = true;
+    }
+  });
+
+  if (!Array.isArray(likertState.responses)) {
+    likertState.responses = base.responses.map((item) => ({ ...item }));
+    dirty = true;
+  }
+
+  LIKERT_ITEMS.forEach((_, index) => {
+    const response = likertState.responses[index];
+    if (!response || typeof response !== "object" || Array.isArray(response)) {
+      likertState.responses[index] = { score: null, reason: "" };
+      dirty = true;
+      return;
+    }
+
+    const normalizedScore = isLikertScoreSelected(response.score) ? Number(response.score) : null;
+    const normalizedReason = String(response.reason || "");
+
+    if (response.score !== normalizedScore) {
+      response.score = normalizedScore;
+      dirty = true;
+    }
+
+    if (response.reason !== normalizedReason) {
+      response.reason = normalizedReason;
+      dirty = true;
+    }
+  });
+
+  if (likertState.responses.length !== LIKERT_ITEMS.length) {
+    likertState.responses = LIKERT_ITEMS.map((_, index) => likertState.responses[index] || { score: null, reason: "" });
+    dirty = true;
+  }
+
+  const maxIndex = Math.max(LIKERT_ITEMS.length, 0);
+  const nextIndex = Math.min(maxIndex, Math.max(0, Number(likertState.currentItemIndex || 0)));
+  if (likertState.currentItemIndex !== nextIndex) {
+    likertState.currentItemIndex = nextIndex;
+    dirty = true;
+  }
+
+  return dirty;
 }
 
 function ensureQuizStateStructure(quizState, quizEntry) {
@@ -1389,6 +1456,115 @@ function runQuizPageEntryAnimation(direction) {
       ],
       {
         duration: 300,
+        easing: "cubic-bezier(0.33, 1, 0.68, 1)",
+      }
+    );
+  }
+}
+
+function isLikertReasonRequired(score) {
+  if (!isLikertScoreSelected(score)) {
+    return false;
+  }
+  const numericScore = Number(score);
+  return numericScore === 1 || numericScore === 5;
+}
+
+function getLikertProgressPercent(score) {
+  const safeScore = isLikertScoreSelected(score) ? Number(score) : 3;
+  return Number((((safeScore - 1) / 4) * 100).toFixed(3));
+}
+
+function animateLikertPageExit(direction, onComplete) {
+  const page = app.querySelector(".likert-page");
+  const currentDot = app.querySelector(".likert-progress-dot.is-current");
+  if (!page) {
+    onComplete();
+    return;
+  }
+
+  const offset = direction === "next" ? -32 : 32;
+  let finished = false;
+  const finishOnce = () => {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    onComplete();
+  };
+
+  page
+    .animate(
+      [
+        { transform: "translateX(0) scale(1)", opacity: 1, filter: "blur(0px)" },
+        { transform: `translateX(${offset}px) scale(0.992)`, opacity: 0, filter: "blur(3px)" },
+      ],
+      {
+        duration: 180,
+        easing: "cubic-bezier(0.4, 0, 0.2, 1)",
+        fill: "forwards",
+      }
+    )
+    .finished.then(finishOnce, finishOnce);
+
+  if (currentDot) {
+    currentDot.animate(
+      [
+        { transform: "translateX(0) scaleX(1) scaleY(1)" },
+        { transform: `translateX(${direction === "next" ? 4 : -4}px) scaleX(0.92) scaleY(0.98)` },
+      ],
+      {
+        duration: 140,
+        easing: "cubic-bezier(0.33, 1, 0.68, 1)",
+        fill: "forwards",
+      }
+    );
+  }
+}
+
+function runLikertPageEntryAnimation(direction) {
+  const page = app.querySelector(".likert-page");
+  const indicator = app.querySelector(".likert-indicator");
+  const currentDot = app.querySelector(".likert-progress-dot.is-current");
+  if (!page) {
+    return;
+  }
+
+  const offset = direction === "next" ? 36 : -36;
+
+  page.animate(
+    [
+      { transform: `translateX(${offset}px) scale(0.992)`, opacity: 0, filter: "blur(3px)" },
+      { transform: "translateX(0) scale(1)", opacity: 1, filter: "blur(0px)" },
+    ],
+    {
+      duration: 250,
+      easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+    }
+  );
+
+  if (indicator) {
+    indicator.animate(
+      [
+        { transform: `translateX(${direction === "next" ? 3 : -3}px)` },
+        { transform: "translateX(0)" },
+      ],
+      {
+        duration: 180,
+        easing: "cubic-bezier(0.33, 1, 0.68, 1)",
+      }
+    );
+  }
+
+  if (currentDot) {
+    currentDot.animate(
+      [
+        { transform: `translateX(${direction === "next" ? -5 : 5}px) scaleX(0.88) scaleY(0.98)` },
+        { transform: "translateX(0) scaleX(1.08) scaleY(1)", offset: 0.68 },
+        { transform: "translateX(0) scaleX(1) scaleY(1)" },
+      ],
+      {
+        duration: 230,
         easing: "cubic-bezier(0.33, 1, 0.68, 1)",
       }
     );
@@ -1900,63 +2076,225 @@ function renderStudyQuiz(session, stage, content, quizEntry, { transitionDirecti
   }
 }
 
-function renderLikertForm(session, stage) {
-  const rows = LIKERT_ITEMS.map((item, idx) => {
-    const response = stage.likert.responses[idx] || { score: null, reason: "" };
-    const options = [1, 2, 3, 4, 5]
-      .map(
-        (n) => `
-        <label class="likert-option">
-          <input type="radio" name="likert_score_${idx}" value="${n}" ${Number(response.score) === n ? "checked" : ""}>
-          <span>${n}</span>
-        </label>
-      `
-      )
-      .join("");
+function renderLikertForm(session, stage, { transitionDirection = "" } = {}) {
+  const likertState = stage.likert || (stage.likert = createLikertState());
+  const structureDirty = ensureLikertStateStructure(likertState);
+  if (structureDirty) {
+    persistSession(session);
+  }
 
-    return `
-      <article class="likert-card" data-likert-index="${idx}">
-        <p><strong>${idx + 1}.</strong> ${escapeHtml(item)}</p>
-        <div class="likert-options">${options}</div>
-        <label class="field-label" for="likert_reason_${idx}">이유</label>
-        <textarea class="text-area" id="likert_reason_${idx}" data-likert-reason="${idx}" rows="2">${escapeHtml(response.reason || "")}</textarea>
-      </article>
-    `;
-  }).join("");
+  const currentIndex = Math.min(Math.max(0, Number(likertState.currentItemIndex || 0)), LIKERT_ITEMS.length);
+  if (likertState.currentItemIndex !== currentIndex) {
+    likertState.currentItemIndex = currentIndex;
+    persistSession(session);
+  }
 
-  app.innerHTML = renderScreen(
-    `
-    <h1>단계 설문 (${escapeHtml(formatConditionLabel(stage.condition))})</h1>
-    <p class="muted">각 문항에 1~5점을 선택하고 이유를 작성해 주세요.</p>
-    <div class="likert-list">${rows}</div>
-    <div class="study-next-wrap">
-      <button class="button button-primary next-button" id="likert-next">다음</button>
-    </div>
-  `,
-    {
-      screenClass: "list-screen",
-      leadingHtml: getStageLeadingHtml(session, stage),
-      showThemeToggle: false,
-    }
-  );
+  const isCompletionPage = currentIndex === LIKERT_ITEMS.length;
+  const currentPrompt = isCompletionPage ? "" : LIKERT_ITEMS[currentIndex];
+  const currentResponse = isCompletionPage ? null : likertState.responses[currentIndex] || { score: null, reason: "" };
+  const selectedScore = currentResponse && isLikertScoreSelected(currentResponse.score) ? Number(currentResponse.score) : null;
+  const sliderValue = selectedScore == null ? 3 : selectedScore;
+  const reasonRequired = isLikertReasonRequired(selectedScore);
+
+  const indicatorHtml = LIKERT_ITEMS.map((_, index) => {
+    const rawScore = likertState.responses[index]?.score;
+    const answered = isLikertScoreSelected(rawScore)
+      && (!isLikertReasonRequired(rawScore) || String(likertState.responses[index]?.reason || "").trim().length > 0);
+    const className = [
+      "likert-progress-dot",
+      index === currentIndex ? "is-current" : "",
+      answered ? "is-answered" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return `<span class="${className}" aria-hidden="true"></span>`;
+  })
+    .concat(`<span class="likert-progress-dot likert-progress-finish ${isCompletionPage ? "is-current" : ""}" aria-hidden="true"></span>`)
+    .join("");
+
+  const bodyHtml = `
+    <section class="likert-layout">
+      <section class="likert-shell">
+        <article class="likert-page ${isCompletionPage ? "is-complete" : ""}">
+          ${
+            isCompletionPage
+              ? `
+                <div class="likert-complete-content">
+                  <p class="likert-page-kicker">${escapeHtml(formatConditionLabel(stage.condition))}</p>
+                  <h1 class="likert-complete-title">수고하셨습니다!</h1>
+                  <p class="muted">이 단계의 설문 응답을 저장하고 다음 단계로 이동합니다.</p>
+                  <button class="button button-primary next-button" id="likert-submit">다음 단계로</button>
+                </div>
+              `
+              : `
+                <div class="likert-page-content">
+                  <div class="likert-page-head">
+                    <p class="likert-page-kicker">문항 ${currentIndex + 1}</p>
+                    <p class="likert-question">${escapeHtml(currentPrompt)}</p>
+                  </div>
+
+                  <div
+                    class="likert-slider"
+                    data-empty="${selectedScore == null}"
+                    style="--likert-progress:${getLikertProgressPercent(sliderValue)};"
+                  >
+                    <div class="likert-scale-labels">
+                      <span>전혀 그렇지 않다</span>
+                      <span>그렇지 않다</span>
+                      <span>보통이다</span>
+                      <span>그렇다</span>
+                      <span>매우 그렇다</span>
+                    </div>
+                    <div class="likert-range-wrap">
+                      <input
+                        class="likert-range"
+                        id="likert_score_${currentIndex}"
+                        type="range"
+                        min="1"
+                        max="5"
+                        step="1"
+                        value="${sliderValue}"
+                        aria-label="문항 ${currentIndex + 1} 점수 선택"
+                      >
+                    </div>
+                  </div>
+
+                  <div class="likert-reason">
+                    <div class="likert-reason-head">
+                      <p class="likert-reason-hint">
+                        <span class="likert-reason-score ${selectedScore == null ? "is-empty" : ""}">${
+                          selectedScore == null ? "0점" : `${selectedScore}점`
+                        }</span>
+                        <span class="likert-reason-copy">을 선택한 이유를 적어 주세요.</span>
+                        <span class="likert-required ${reasonRequired ? "" : "is-hidden"}">필수</span>
+                      </p>
+                    </div>
+                    <textarea
+                      class="text-area likert-reason-input"
+                      id="likert_reason_${currentIndex}"
+                      data-likert-reason="${currentIndex}"
+                      rows="4"
+                      placeholder="이유를 적어주세요."
+                    >${escapeHtml(currentResponse?.reason || "")}</textarea>
+                  </div>
+                </div>
+              `
+          }
+        </article>
+
+        <div class="likert-nav">
+          ${
+            currentIndex === 0
+              ? '<div class="likert-nav-spacer" aria-hidden="true"></div>'
+              : '<button class="button likert-nav-button" id="likert-prev">이전</button>'
+          }
+          <div class="likert-indicator" aria-label="설문 진행 상태">
+            ${indicatorHtml}
+          </div>
+          ${
+            isCompletionPage
+              ? '<div class="likert-nav-spacer" aria-hidden="true"></div>'
+              : '<button class="button likert-nav-button" id="likert-next">다음</button>'
+          }
+        </div>
+      </section>
+    </section>
+  `;
+
+  app.innerHTML = renderScreen(bodyHtml, {
+    screenClass: "likert-screen",
+    leadingHtml: getStageLeadingHtml(session, stage),
+    showThemeToggle: false,
+  });
 
   bindThemeToggle();
 
-  app.querySelectorAll("input[type='radio'][name^='likert_score_']").forEach((node) => {
-    node.addEventListener("change", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement)) {
-        return;
-      }
-      const idx = Number(target.name.replace("likert_score_", ""));
-      if (!Number.isInteger(idx)) {
-        return;
-      }
-      stage.likert.responses[idx] = stage.likert.responses[idx] || { score: null, reason: "" };
-      stage.likert.responses[idx].score = Number(target.value);
-      persistSession(session);
+  if (transitionDirection) {
+    runLikertPageEntryAnimation(transitionDirection);
+  }
+
+  const validateResponse = (index) => {
+    const response = likertState.responses[index];
+    const score = response?.score;
+    if (!isLikertScoreSelected(score)) {
+      window.alert(`${index + 1}번 문항의 점수를 선택해 주세요.`);
+      return false;
+    }
+    if (isLikertReasonRequired(score) && !String(response?.reason || "").trim()) {
+      window.alert(`${index + 1}번 문항은 1점 또는 5점을 선택했으므로 이유를 입력해 주세요.`);
+      return false;
+    }
+    return true;
+  };
+
+  const moveLikertPage = (nextIndex, direction) => {
+    likertState.currentItemIndex = Math.min(Math.max(0, nextIndex), LIKERT_ITEMS.length);
+    persistSession(session);
+    animateLikertPageExit(direction, () => {
+      renderLikertForm(session, stage, { transitionDirection: direction });
     });
-  });
+  };
+
+  const applyScoreUi = (score) => {
+    const hasScore = isLikertScoreSelected(score);
+    const numericScore = hasScore ? Number(score) : null;
+    const slider = app.querySelector(".likert-slider");
+    const rangeNode = app.querySelector(".likert-range");
+    const reasonHeadNode = app.querySelector(".likert-reason-head");
+    const reasonInputNode = app.querySelector(".likert-reason-input");
+    const currentDot = app.querySelector(".likert-progress-dot.is-current");
+
+    if (slider) {
+      slider.dataset.empty = String(!hasScore);
+      slider.style.setProperty("--likert-progress", String(getLikertProgressPercent(hasScore ? numericScore : 3)));
+    }
+
+    if (rangeNode instanceof HTMLInputElement) {
+      rangeNode.value = String(hasScore ? numericScore : 3);
+    }
+
+    if (currentDot) {
+      currentDot.classList.toggle("is-answered", hasScore);
+    }
+
+    const required = isLikertReasonRequired(numericScore);
+    if (reasonHeadNode) {
+      reasonHeadNode.innerHTML = `
+        <p class="likert-reason-hint">
+          <span class="likert-reason-score ${hasScore ? "" : "is-empty"}">${hasScore ? `${numericScore}점` : "0점"}</span>
+          <span class="likert-reason-copy">을 선택한 이유를 적어 주세요.</span>
+          <span class="likert-required ${required ? "" : "is-hidden"}">필수</span>
+        </p>
+      `;
+    }
+    if (reasonInputNode instanceof HTMLTextAreaElement) {
+      reasonInputNode.placeholder = "이유를 적어주세요.";
+    }
+  };
+
+  const syncScoreSelection = (score) => {
+    if (isCompletionPage) {
+      return;
+    }
+    const nextScore = Math.min(5, Math.max(1, Number(score)));
+    if (!Number.isFinite(nextScore)) {
+      return;
+    }
+    likertState.responses[currentIndex] = likertState.responses[currentIndex] || { score: null, reason: "" };
+    likertState.responses[currentIndex].score = nextScore;
+    persistSession(session);
+    applyScoreUi(nextScore);
+  };
+
+  const rangeInput = app.querySelector(".likert-range");
+  if (rangeInput instanceof HTMLInputElement) {
+    const commitRangeValue = () => {
+      syncScoreSelection(Number(rangeInput.value));
+    };
+    rangeInput.addEventListener("input", commitRangeValue);
+    rangeInput.addEventListener("pointerup", commitRangeValue);
+    rangeInput.addEventListener("change", commitRangeValue);
+  }
 
   app.querySelectorAll("[data-likert-reason]").forEach((node) => {
     node.addEventListener("input", (event) => {
@@ -1964,32 +2302,46 @@ function renderLikertForm(session, stage) {
       if (!(target instanceof HTMLTextAreaElement)) {
         return;
       }
-      const idx = Number(target.getAttribute("data-likert-reason"));
-      if (!Number.isInteger(idx)) {
+      const index = Number(target.getAttribute("data-likert-reason"));
+      if (!Number.isInteger(index)) {
         return;
       }
-      stage.likert.responses[idx] = stage.likert.responses[idx] || { score: null, reason: "" };
-      stage.likert.responses[idx].reason = target.value;
+      likertState.responses[index] = likertState.responses[index] || { score: null, reason: "" };
+      likertState.responses[index].reason = target.value;
       persistSession(session);
     });
   });
 
+  const prevBtn = app.querySelector("#likert-prev");
+  if (prevBtn) {
+    prevBtn.addEventListener("click", () => {
+      moveLikertPage(currentIndex - 1, "prev");
+    });
+  }
+
   const nextBtn = app.querySelector("#likert-next");
   if (nextBtn) {
     nextBtn.addEventListener("click", () => {
-      for (let i = 0; i < LIKERT_ITEMS.length; i += 1) {
-        const response = stage.likert.responses[i];
-        if (!response || !Number.isFinite(Number(response.score))) {
-          window.alert(`Likert ${i + 1}번 점수를 선택해 주세요.`);
-          return;
-        }
-        if (!String(response.reason || "").trim()) {
-          window.alert(`Likert ${i + 1}번 이유를 입력해 주세요.`);
+      if (!validateResponse(currentIndex)) {
+        return;
+      }
+      moveLikertPage(currentIndex + 1, "next");
+    });
+  }
+
+  const submitBtn = app.querySelector("#likert-submit");
+  if (submitBtn) {
+    submitBtn.addEventListener("click", () => {
+      for (let index = 0; index < LIKERT_ITEMS.length; index += 1) {
+        if (!validateResponse(index)) {
+          likertState.currentItemIndex = index;
+          persistSession(session);
+          renderLikertForm(session, stage, { transitionDirection: "prev" });
           return;
         }
       }
 
-      stage.likert.completedAt = nowIso();
+      likertState.completedAt = nowIso();
       nextPhase(session);
       persistSession(session);
       renderRoute();
