@@ -454,6 +454,8 @@ function setupConditionInteraction(readerScroll, readerText, lineOverlay, condit
     contentTop: null,
     lineHeight: estimateLineHeight(readerText),
   };
+  let dInitFrame1 = 0;
+  let dInitFrame2 = 0;
 
   function hideHighlight() {
     lineOverlay.style.display = "none";
@@ -746,8 +748,25 @@ function setupConditionInteraction(readerScroll, readerText, lineOverlay, condit
     const scrollRect = readerScroll.getBoundingClientRect();
     const textRect = readerText.getBoundingClientRect();
     const x = scrollRect.left + 30;
-    const y = Math.max(scrollRect.top + lineState.lineHeight, textRect.top + 2);
+    const y = Math.max(scrollRect.top + 12, textRect.top + 2);
     updateHighlightFromPoint(x, y, false);
+  }
+
+  function scheduleDStartLine() {
+    if (dInitFrame1) {
+      cancelAnimationFrame(dInitFrame1);
+    }
+    if (dInitFrame2) {
+      cancelAnimationFrame(dInitFrame2);
+    }
+
+    dInitFrame1 = requestAnimationFrame(() => {
+      dInitFrame1 = 0;
+      dInitFrame2 = requestAnimationFrame(() => {
+        dInitFrame2 = 0;
+        initializeDStartLine();
+      });
+    });
   }
 
   const cleanups = [];
@@ -761,7 +780,12 @@ function setupConditionInteraction(readerScroll, readerText, lineOverlay, condit
     cleanups.push(() => readerScroll.removeEventListener("mousemove", onMove));
   } else if (condition === "D") {
     const onKeyDown = (event) => {
+      if (event.__hciDKeyHandled) {
+        return;
+      }
+
       if (event.key === "ArrowUp") {
+        event.__hciDKeyHandled = true;
         event.preventDefault();
         if (typeof onArrow === "function") {
           onArrow(-1);
@@ -771,6 +795,7 @@ function setupConditionInteraction(readerScroll, readerText, lineOverlay, condit
       }
 
       if (event.key === "ArrowDown") {
+        event.__hciDKeyHandled = true;
         event.preventDefault();
         if (typeof onArrow === "function") {
           onArrow(1);
@@ -780,6 +805,7 @@ function setupConditionInteraction(readerScroll, readerText, lineOverlay, condit
       }
 
       if (event.key === " " || event.key === "PageUp" || event.key === "PageDown") {
+        event.__hciDKeyHandled = true;
         event.preventDefault();
       }
     };
@@ -789,6 +815,7 @@ function setupConditionInteraction(readerScroll, readerText, lineOverlay, condit
     };
 
     readerScroll.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, { capture: true });
     window.addEventListener("wheel", onWheel, { passive: false, capture: true });
 
     try {
@@ -797,10 +824,19 @@ function setupConditionInteraction(readerScroll, readerText, lineOverlay, condit
       readerScroll.focus();
     }
 
-    initializeDStartLine();
+    scheduleDStartLine();
 
     cleanups.push(() => readerScroll.removeEventListener("keydown", onKeyDown));
+    cleanups.push(() => window.removeEventListener("keydown", onKeyDown, { capture: true }));
     cleanups.push(() => window.removeEventListener("wheel", onWheel, { capture: true }));
+    cleanups.push(() => {
+      if (dInitFrame1) {
+        cancelAnimationFrame(dInitFrame1);
+      }
+      if (dInitFrame2) {
+        cancelAnimationFrame(dInitFrame2);
+      }
+    });
   } else {
     hideHighlight();
   }
