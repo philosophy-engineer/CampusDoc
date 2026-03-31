@@ -76,8 +76,36 @@
         background: #f3f4f6;
       }
 
+      .controls {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 14px;
+        margin-bottom: 14px;
+      }
+
+      .controls legend {
+        font-weight: 600;
+        padding: 0 4px;
+      }
+
+      .radio-group {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px 12px;
+        margin-top: 8px;
+      }
+
+      .radio-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
       .actions {
         margin-bottom: 12px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
       }
 
       .button {
@@ -91,18 +119,64 @@
         cursor: pointer;
       }
 
-      .content {
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 16px;
+      .badge {
+        display: inline-block;
+        margin-bottom: 10px;
+        border: 1px solid #bfdbfe;
+        background: #eff6ff;
+        color: #1d4ed8;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        padding: 4px 10px;
       }
 
-      pre {
+      .reader-frame {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+
+      .reader-scroll {
+        position: relative;
+        max-height: min(72vh, 760px);
+        overflow: auto;
+        padding: 16px;
+        line-height: 1.65;
+        font-size: 16px;
+      }
+
+      .reader-scroll.mode-d {
+        overflow: hidden;
+      }
+
+      .reader-text {
         margin: 0;
         white-space: pre-wrap;
         word-break: break-word;
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        line-height: 1.5;
+        position: relative;
+        z-index: 2;
+      }
+
+      .line-overlay {
+        position: absolute;
+        left: 0;
+        width: 0;
+        z-index: 1;
+        pointer-events: none;
+        border-radius: 6px;
+        display: none;
+      }
+
+      .line-overlay.mode-b {
+        background: transparent;
+        border-bottom: 2px solid #000000;
+        border-radius: 0;
+      }
+
+      .line-overlay.mode-c,
+      .line-overlay.mode-d {
+        background: rgba(37, 99, 235, 0.14);
       }
     </style>
   </head>
