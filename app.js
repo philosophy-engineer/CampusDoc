@@ -1844,31 +1844,28 @@ function renderRecordsScreen() {
     return bTime - aTime;
   });
   const meta = loadStudyRecordsMeta();
+  const lastBulkDownloaded = formatDateTimeDisplay(meta.last_bulk_downloaded_at || "");
+  const summaryText = `기록 ${records.length}건 · 전체 다운로드 ${meta.total_download_count}회${
+    lastBulkDownloaded ? ` · 마지막 전체 다운로드 ${lastBulkDownloaded}` : ""
+  }`;
 
   const recordItems = records.length
     ? records
         .map((record) => {
           const sessionId = record.session_id || "";
+          const completedAt = formatDateTimeDisplay(record.session_completed_at || record.session_started_at || "");
+          const lastDownloadedAt = formatDateTimeDisplay(record.last_downloaded_at || "");
           return `
             <article class="record-item">
               <div class="record-head">
-                <p><strong>${escapeHtml(record.participant_id || "-")}</strong> · 그룹 ${escapeHtml(
-                  record.group_id || "-"
-                )}</p>
-                <span class="badge">다운로드 ${Number(record.download_count || 0)}회</span>
+                <div class="record-head-main">
+                  <p class="record-title">${escapeHtml(record.participant_id || "-")} · 그룹 ${escapeHtml(
+                    record.group_id || "-"
+                  )}</p>
+                  <p class="muted">완료 ${escapeHtml(completedAt || "-")}</p>
+                </div>
+                <span class="badge record-badge">다운로드 ${Number(record.download_count || 0)}회</span>
               </div>
-              <p class="muted">완료: ${escapeHtml(
-                formatDateTimeDisplay(record.session_completed_at || record.session_started_at || "")
-              )}</p>
-              <p class="muted">세션 ID: ${escapeHtml(sessionId)}</p>
-              <p class="muted">마지막 세션 다운로드: ${escapeHtml(
-                formatDateTimeDisplay(record.last_downloaded_at || "")
-              )}</p>
-
-              <details class="record-details">
-                <summary>상세 보기</summary>
-                ${renderRecordStageSummary(record)}
-              </details>
 
               <div class="record-actions">
                 <button class="button" data-record-download="${escapeHtml(sessionId)}" ${
@@ -1878,6 +1875,15 @@ function renderRecordsScreen() {
                   sessionId ? "" : "disabled"
                 }>삭제</button>
               </div>
+
+              <details class="record-details">
+                <summary>상세 보기</summary>
+                <div class="record-meta">
+                  <p class="muted">세션 ID: ${escapeHtml(sessionId || "-")}</p>
+                  <p class="muted">마지막 세션 다운로드: ${escapeHtml(lastDownloadedAt || "-")}</p>
+                </div>
+                ${renderRecordStageSummary(record)}
+              </details>
             </article>
           `;
         })
@@ -1886,28 +1892,24 @@ function renderRecordsScreen() {
 
   app.innerHTML = renderScreen(
     `
-    <h1>저장 데이터 관리</h1>
-    <div class="study-resume-box">
-      <p><strong>기록 수:</strong> ${records.length}건</p>
-      <p><strong>전체 다운로드 횟수:</strong> ${meta.total_download_count}회</p>
-      <p class="muted">마지막 전체 다운로드: ${escapeHtml(
-        formatDateTimeDisplay(meta.last_bulk_downloaded_at || "")
-      )}</p>
-    </div>
+    <section class="records-layout">
+      <section class="records-section">
+        <p class="records-summary">${escapeHtml(summaryText)}</p>
 
-    <div class="start-actions">
-      <button class="button button-primary" id="download-all-records-btn">전체 CSV 다운로드</button>
-      <button class="button" id="clear-all-records-btn">세션+기록 전체 초기화</button>
-      <a class="button" href="#/start">시작 화면으로</a>
-    </div>
+        <div class="records-toolbar">
+          <button class="button button-primary" id="download-all-records-btn">전체 CSV 다운로드</button>
+          <button class="button" id="clear-all-records-btn">세션+기록 전체 초기화</button>
+        </div>
 
-    <section class="records-list">
-      ${recordItems}
+        <section class="records-list">
+          ${recordItems}
+        </section>
+      </section>
     </section>
   `,
     {
-      screenClass: "list-screen",
-      leadingHtml: '<span class="app-mark">HCI TXT Reader</span>',
+      screenClass: "records-screen",
+      leadingHtml: '<a class="browse-home-button" href="#/start">시작으로</a>',
     }
   );
 

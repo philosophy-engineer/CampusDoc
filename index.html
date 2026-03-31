@@ -119,7 +119,8 @@
         flex-direction: column;
       }
 
-      .screen.browse-screen {
+      .screen.browse-screen,
+      .screen.records-screen {
         max-width: 1160px;
         margin: 0 auto;
         border: none;
@@ -347,6 +348,55 @@
         gap: 16px;
         width: min(960px, 100%);
         margin: 0 auto;
+      }
+
+      .records-layout {
+        flex: 1;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: clamp(28px, 8vh, 72px) 0 28px;
+      }
+
+      .records-section {
+        width: min(960px, 100%);
+        margin: 0 auto;
+        display: grid;
+        gap: 18px;
+      }
+
+      .records-summary {
+        margin: 0;
+        font-weight: 600;
+        font-size: 1.04rem;
+        color: var(--text);
+        line-height: 1.7;
+      }
+
+      .records-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .records-toolbar .button,
+      .record-actions .button {
+        min-height: 46px;
+        padding: 0 16px;
+        border-radius: 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .records-toolbar .button-primary {
+        background: var(--btn-bg);
+        border-color: var(--line);
+        color: var(--text);
+      }
+
+      .records-toolbar .button-primary:hover {
+        background: var(--btn-bg-hover);
       }
 
       .button {
@@ -642,45 +692,68 @@
       }
 
       .records-list {
-        margin-top: 14px;
         display: grid;
-        gap: 10px;
+        gap: 14px;
       }
 
       .record-item {
         border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 12px;
+        border-radius: 24px;
+        padding: 20px 22px;
+        background: linear-gradient(155deg, var(--surface), var(--surface-soft));
+        box-shadow: var(--shadow);
       }
 
       .record-head {
         display: flex;
         justify-content: space-between;
-        align-items: center;
-        gap: 8px;
+        align-items: flex-start;
+        gap: 12px;
       }
 
       .record-head p {
         margin: 0;
       }
 
+      .record-head-main {
+        display: grid;
+        gap: 6px;
+      }
+
+      .record-title {
+        margin: 0;
+        font-size: 1.16rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+
+      .record-meta {
+        display: grid;
+        gap: 6px;
+        margin-top: 14px;
+      }
+
       .record-actions {
-        margin-top: 10px;
+        margin-top: 16px;
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
       }
 
       .record-details {
-        margin-top: 8px;
+        margin-top: 16px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line);
       }
 
       .record-details summary {
         cursor: pointer;
+        font-weight: 600;
+        color: var(--text);
       }
 
       .record-stage-list {
-        margin: 8px 0 0;
+        margin: 12px 0 0;
         padding-left: 18px;
       }
 
@@ -689,9 +762,11 @@
       }
 
       .empty-state {
-        border: 1px dashed var(--line);
-        border-radius: 12px;
-        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: 24px;
+        background: linear-gradient(155deg, var(--surface), var(--surface-soft));
+        box-shadow: var(--shadow);
       }
 
       .badge {
@@ -708,6 +783,19 @@
         background: rgba(113, 157, 255, 0.2);
         color: #b5ceff;
         border-color: rgba(150, 183, 255, 0.34);
+      }
+
+      .record-badge {
+        border-color: var(--line);
+        background: transparent;
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      body[data-theme="dark"] .record-badge {
+        border-color: var(--line);
+        background: transparent;
+        color: var(--text);
       }
 
       .reader-stage {
@@ -830,6 +918,24 @@
 
         .browse-layout {
           display: block;
+        }
+
+        .records-layout {
+          display: block;
+          padding-top: 18px;
+        }
+
+        .records-toolbar {
+          flex-direction: column;
+        }
+
+        .records-toolbar .button,
+        .record-actions .button {
+          width: 100%;
+        }
+
+        .record-head {
+          flex-direction: column;
         }
 
         .group-buttons {
