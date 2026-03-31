@@ -599,15 +599,25 @@
       }
 
       .study-next-wrap {
-        position: fixed;
-        right: clamp(10px, 3vw, 28px);
-        bottom: clamp(10px, 3vw, 28px);
-        z-index: 20;
+        width: min(840px, 100%);
+        margin: 18px auto 0;
+        display: flex;
+        justify-content: flex-end;
       }
 
       .next-button {
         min-width: 96px;
         padding: 10px 16px;
+        border-color: #5f6470;
+        background: #5f6470;
+        color: #f5f6f8;
+        transition: transform 180ms ease, background 180ms ease, border-color 180ms ease;
+      }
+
+      .next-button:hover {
+        background: #4f545f;
+        border-color: #4f545f;
+        transform: scale(1.03);
       }
 
       .modal-backdrop {
@@ -988,8 +998,7 @@
         }
 
         .study-next-wrap {
-          right: 10px;
-          bottom: 10px;
+          width: 100%;
         }
       }
     </style>

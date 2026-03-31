@@ -1185,19 +1185,18 @@ function renderStudyTutorial(session, stage, tutorialText) {
   app.innerHTML = renderScreen(
     `
     <div class="study-meta">
-      <span class="badge">연습 단계 (T0)</span>
-      <p class="muted">지금부터 ${escapeHtml(formatConditionLabel(stage.condition))} 인터페이스를 T0 지문으로 먼저 학습합니다.</p>
+      <p class="muted">연습 지문</p>
     </div>
 
     ${buildReaderBlock({
-      title: `연습 지문: ${formatFilenameForDisplay(TEXT_FILES.T0)}`,
+      title: formatFilenameForDisplay(TEXT_FILES.T0),
       content: tutorialText,
       condition: stage.condition,
       idPrefix: "study-tutorial",
     })}
 
     <div class="study-next-wrap">
-      <button class="button button-primary next-button" id="study-next" disabled>다음</button>
+      <button class="button button-primary next-button" id="study-next" disabled>지문 읽기</button>
     </div>
 
     <div class="modal-backdrop" id="tutorial-modal">
@@ -1268,19 +1267,18 @@ function renderStudyMainReading(session, stage, content) {
   app.innerHTML = renderScreen(
     `
     <div class="study-meta">
-      <span class="badge">본 읽기 단계 (${escapeHtml(stage.taskId)})</span>
-      <p class="muted">지문을 읽은 뒤 우하단의 다음 버튼으로 문제 풀이로 이동합니다.</p>
+      <p class="muted">지문</p>
     </div>
 
     ${buildReaderBlock({
-      title: `${escapeHtml(stage.taskId)}: ${formatFilenameForDisplay(stage.textFile)}`,
+      title: formatFilenameForDisplay(stage.textFile),
       content,
       condition: stage.condition,
       idPrefix: "study-main",
     })}
 
     <div class="study-next-wrap">
-      <button class="button button-primary next-button" id="reading-next">다음</button>
+      <button class="button button-primary next-button" id="reading-next">문제 풀기</button>
     </div>
   `,
     {
