@@ -25,6 +25,10 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function formatFilenameForDisplay(name) {
+  return String(name).replace(/\.txt$/i, "").replaceAll("-", " ");
+}
+
 function getCondition() {
   const raw = localStorage.getItem(CONDITION_KEY);
   return VALID_CONDITIONS.includes(raw) ? raw : "A";
@@ -195,7 +199,8 @@ function renderList(files) {
       : `<ul class="file-list">${files
           .map((name) => {
             const encoded = encodeURIComponent(name);
-            return `<li><a class="file-link" href="#/file/${encoded}">${escapeHtml(name)}</a></li>`;
+            const displayName = formatFilenameForDisplay(name);
+            return `<li><a class="file-link" href="#/file/${encoded}">${escapeHtml(displayName)}</a></li>`;
           })
           .join("")}</ul>`;
 
@@ -323,17 +328,15 @@ function isTextNode(node) {
 }
 
 function renderReader(name, content, condition) {
-  const conditionLabel = `Condition ${condition}`;
   const modeClass = condition === "B" ? "mode-b" : condition === "C" ? "mode-c" : condition === "D" ? "mode-d" : "";
+  const displayName = formatFilenameForDisplay(name);
 
   app.innerHTML = renderScreen(
     `
     <div class="reader-stage">
       <article class="reader-paper">
         <div class="reader-paper-head">
-          <span class="badge">${conditionLabel}</span>
-          <h1>${escapeHtml(name)}</h1>
-          <p class="reader-hint">리더 화면에서는 조건 변경이 잠금됩니다.</p>
+          <h1>${escapeHtml(displayName)}</h1>
         </div>
 
         <div class="reader-frame">
