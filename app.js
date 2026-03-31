@@ -271,23 +271,27 @@ function incrementSessionDownloadCount(sessionId) {
   return next;
 }
 
-function renderTopbar(leadingHtml = "") {
+function renderTopbar(leadingHtml = "", { showThemeToggle = true } = {}) {
   const theme = applyTheme(getTheme());
   const value = theme === "dark" ? "Dark" : "Light";
   return `
     <header class="topbar">
       <div class="topbar-leading">${leadingHtml}</div>
-      <button class="theme-toggle" type="button" id="theme-toggle" aria-pressed="${theme === "dark"}">
-        <span class="theme-toggle__value">${value}</span>
-      </button>
+      ${
+        showThemeToggle
+          ? `<button class="theme-toggle" type="button" id="theme-toggle" aria-pressed="${theme === "dark"}">
+              <span class="theme-toggle__value">${value}</span>
+            </button>`
+          : ""
+      }
     </header>
   `;
 }
 
-function renderScreen(contentHtml, { screenClass = "", leadingHtml = "" } = {}) {
+function renderScreen(contentHtml, { screenClass = "", leadingHtml = "", showThemeToggle = true } = {}) {
   return `
     <section class="screen ${screenClass}">
-      ${renderTopbar(leadingHtml)}
+      ${renderTopbar(leadingHtml, { showThemeToggle })}
       ${contentHtml}
     </section>
   `;
@@ -361,7 +365,7 @@ function teardownReaderSession() {
   }
 }
 
-function renderLoading(message) {
+function renderLoading(message, { showThemeToggle = true } = {}) {
   app.innerHTML = renderScreen(
     `
     <h1>HCI Study Reader</h1>
@@ -370,6 +374,7 @@ function renderLoading(message) {
     {
       screenClass: "status-screen",
       leadingHtml: '<span class="app-mark">HCI TXT Reader</span>',
+      showThemeToggle,
     }
   );
   bindThemeToggle();
@@ -1210,6 +1215,7 @@ function renderStudyTutorial(session, stage, tutorialText) {
     {
       screenClass: "reader-screen",
       leadingHtml: getStageLeadingHtml(session, stage),
+      showThemeToggle: false,
     }
   );
 
@@ -1284,6 +1290,7 @@ function renderStudyMainReading(session, stage, content) {
     {
       screenClass: "reader-screen",
       leadingHtml: getStageLeadingHtml(session, stage),
+      showThemeToggle: false,
     }
   );
 
@@ -1423,6 +1430,7 @@ function renderStudyQuiz(session, stage, content, quizEntry) {
     {
       screenClass: view === "text" ? "reader-screen" : "list-screen",
       leadingHtml: getStageLeadingHtml(session, stage),
+      showThemeToggle: false,
     }
   );
 
@@ -1555,6 +1563,7 @@ function renderLikertForm(session, stage) {
     {
       screenClass: "list-screen",
       leadingHtml: getStageLeadingHtml(session, stage),
+      showThemeToggle: false,
     }
   );
 
@@ -1657,6 +1666,7 @@ function renderFinalSurvey(session) {
     {
       screenClass: "list-screen",
       leadingHtml: `<span class="app-mark">그룹 ${escapeHtml(session.groupId)} · 최종 설문</span>`,
+      showThemeToggle: false,
     }
   );
 
@@ -1838,6 +1848,7 @@ function renderCompletedStudy(session) {
     {
       screenClass: "list-screen",
       leadingHtml: `<span class="app-mark">그룹 ${escapeHtml(session.groupId)} · 완료</span>`,
+      showThemeToggle: false,
     }
   );
 
@@ -2193,7 +2204,7 @@ async function renderRoute() {
   }
 
   if (route.type === "study") {
-    renderLoading("스터디 화면 로딩 중...");
+    renderLoading("스터디 화면 로딩 중...", { showThemeToggle: false });
     await renderStudy();
     return;
   }
