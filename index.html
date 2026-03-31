@@ -613,7 +613,8 @@
       .modal-backdrop {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.42);
+        background: rgba(219, 223, 231, 0.72);
+        backdrop-filter: blur(8px);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -626,17 +627,53 @@
       }
 
       .modal-card {
-        width: min(560px, 100%);
+        width: min(420px, 100%);
+        min-height: min(360px, calc(100vh - 32px));
         border: 1px solid var(--line);
-        border-radius: 14px;
+        border-radius: 24px;
         background: linear-gradient(155deg, var(--surface), var(--surface-soft));
         box-shadow: var(--shadow);
-        padding: 18px;
+        padding: 28px;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        text-align: center;
+        gap: 18px;
       }
 
       .modal-card h2 {
-        margin-top: 0;
-        margin-bottom: 10px;
+        margin: 0;
+        font-size: clamp(1.45rem, 2vw, 1.8rem);
+        letter-spacing: -0.03em;
+      }
+
+      .modal-card p {
+        margin: 0;
+        line-height: 1.7;
+      }
+
+      .modal-confirm {
+        margin: 18px auto 0;
+        min-height: 46px;
+        padding: 0 24px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--btn-bg);
+        color: var(--text);
+        font: inherit;
+        font-size: 1rem;
+        font-weight: 700;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 180ms ease, background 180ms ease;
+      }
+
+      .modal-confirm:hover {
+        background: var(--btn-bg-hover);
+        transform: scale(1.04);
       }
 
       .tab-buttons {

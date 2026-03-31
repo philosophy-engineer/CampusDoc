@@ -45,10 +45,10 @@ const GROUP_SEQUENCES = {
 };
 
 const CONDITION_INSTRUCTION = {
-  A: "조건 A: 기본 읽기 인터페이스입니다. 일반적인 방식으로 본문을 읽어 주세요.",
-  B: "조건 B: 마우스를 움직이면 현재 줄 아래에 밑줄이 표시됩니다.",
-  C: "조건 C: 마우스를 움직이면 현재 줄이 하이라이트됩니다.",
-  D: "조건 D: 위/아래 방향키로 줄 단위 이동합니다. 마우스 휠 스크롤은 제한됩니다.",
+  A: "기본 읽기 인터페이스입니다. 일반적인 방식으로 본문을 읽어 주세요. 연습 지문으로 인터페이스를 확인해보세요!",
+  B: "마우스를 움직이면 현재 줄 아래에 밑줄이 표시됩니다. 연습 지문으로 인터페이스를 확인해보세요!",
+  C: "마우스를 움직이면 현재 줄이 하이라이트됩니다. 연습 지문으로 인터페이스를 확인해보세요!",
+  D: "위/아래 방향키로 줄 단위 이동합니다. 마우스 휠 스크롤은 제한됩니다. 연습 지문으로 인터페이스를 확인해보세요!",
 };
 
 const CONDITION_SHORT_LABEL = {
@@ -103,6 +103,19 @@ function escapeHtml(value) {
 
 function formatFilenameForDisplay(name) {
   return String(name).replace(/\.txt$/i, "").replaceAll("-", " ");
+}
+
+function formatConditionLabel(condition) {
+  return CONDITION_SHORT_LABEL[condition] || String(condition || "-");
+}
+
+function formatPopupInstructionHtml(condition) {
+  const raw = String(CONDITION_INSTRUCTION[condition] || "");
+  return raw
+    .split(/(?<=[.!?])\s+/)
+    .filter(Boolean)
+    .map((sentence) => escapeHtml(sentence))
+    .join("<br>");
 }
 
 function safeParseJSON(raw, fallback) {
@@ -1071,7 +1084,9 @@ function nextPhase(session) {
 }
 
 function getStageLeadingHtml(session, stage) {
-  return `<span class="app-mark">그룹 ${escapeHtml(session.groupId)} · 단계 ${stage.stageNumber}/4 · 조건 ${stage.condition}</span>`;
+  return `<span class="app-mark">그룹 ${escapeHtml(session.groupId)} · 단계 ${stage.stageNumber}/4 · ${escapeHtml(
+    formatConditionLabel(stage.condition)
+  )}</span>`;
 }
 
 function ensureQuizMap(quizzesJson) {
@@ -1135,7 +1150,7 @@ function renderStudyTutorial(session, stage, tutorialText) {
     `
     <div class="study-meta">
       <span class="badge">연습 단계 (T0)</span>
-      <p class="muted">지금부터 조건 ${stage.condition} 인터페이스를 T0 지문으로 먼저 학습합니다.</p>
+      <p class="muted">지금부터 ${escapeHtml(formatConditionLabel(stage.condition))} 인터페이스를 T0 지문으로 먼저 학습합니다.</p>
     </div>
 
     ${buildReaderBlock({
@@ -1151,9 +1166,9 @@ function renderStudyTutorial(session, stage, tutorialText) {
 
     <div class="modal-backdrop" id="tutorial-modal">
       <div class="modal-card">
-        <h2>조건 ${stage.condition} 사용 안내</h2>
-        <p>${escapeHtml(CONDITION_INSTRUCTION[stage.condition])}</p>
-        <button class="button button-primary" id="close-tutorial-modal">확인</button>
+        <h2>${escapeHtml(formatConditionLabel(stage.condition))}</h2>
+        <p>${formatPopupInstructionHtml(stage.condition)}</p>
+        <button class="modal-confirm" type="button" id="close-tutorial-modal">확인</button>
       </div>
     </div>
   `,
@@ -1496,7 +1511,7 @@ function renderLikertForm(session, stage) {
 
   app.innerHTML = renderScreen(
     `
-    <h1>단계 설문 (조건 ${escapeHtml(stage.condition)})</h1>
+    <h1>단계 설문 (${escapeHtml(formatConditionLabel(stage.condition))})</h1>
     <p class="muted">각 문항에 1~5점을 선택하고 이유를 작성해 주세요.</p>
     <div class="likert-list">${rows}</div>
     <div class="study-next-wrap">
@@ -1576,7 +1591,7 @@ function renderFinalSurvey(session) {
     easiestRefindCondition: "",
   };
 
-  const optionHtml = ['<option value="">선택</option>', ...VALID_CONDITIONS.map((c) => `<option value="${c}">조건 ${c}</option>`)].join("");
+  const optionHtml = ['<option value="">선택</option>', ...VALID_CONDITIONS.map((c) => `<option value="${c}">${escapeHtml(formatConditionLabel(c))}</option>`)].join("");
 
   app.innerHTML = renderScreen(
     `
@@ -1817,7 +1832,7 @@ function renderRecordStageSummary(record) {
       const readingTime = record[`stage${n}_reading_time_sec`] ?? "-";
       const solvingTime = record[`stage${n}_problem_solving_time_sec`] ?? "-";
       const revisitCount = record[`stage${n}_revisit_count`] ?? "-";
-      return `<li>단계 ${n} · 조건 ${escapeHtml(condition)} · 정답률 ${escapeHtml(
+      return `<li>단계 ${n} · ${escapeHtml(formatConditionLabel(condition))} · 정답률 ${escapeHtml(
         String(accuracy)
       )} · 읽기 ${escapeHtml(String(readingTime))}s · 문제 ${escapeHtml(
         String(solvingTime)
