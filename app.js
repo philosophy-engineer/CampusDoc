@@ -989,63 +989,33 @@ function startStudy(groupId, participantId) {
 }
 
 function renderStartHome() {
-  const session = getActiveSession();
-  const inProgress = session && session.status === "in_progress";
-  const completed = session && session.status === "completed";
-
   app.innerHTML = renderScreen(
     `
-    <h1>HCI 유저 스터디 시작</h1>
-    <p class="muted">기본 사용 모드 또는 그룹별 유저 스터디를 선택해 주세요.</p>
+    <section class="home-grid" aria-label="시작 옵션">
+      <a class="home-card home-card-action" href="#/browse">
+        <span class="home-card-title">기본 사용</span>
+      </a>
 
-    ${
-      inProgress
-        ? `<div class="study-resume-box">
-            <p><strong>진행 중인 스터디</strong></p>
-            <p class="muted">참가자: ${escapeHtml(session.participantId)} / 그룹 ${escapeHtml(session.groupId)} / 단계 ${session.currentStageIndex + 1}</p>
-            <p><a class="button" href="#/study">이어하기</a></p>
-          </div>`
-        : ""
-    }
-
-    ${
-      completed
-        ? `<div class="study-resume-box">
-            <p><strong>마지막 스터디 완료됨</strong></p>
-            <p class="muted">참가자: ${escapeHtml(session.participantId)} / 그룹 ${escapeHtml(session.groupId)}</p>
-            <p><a class="button" href="#/study">결과 화면 열기</a></p>
-          </div>`
-        : ""
-    }
-
-    <div class="start-grid">
-      <div class="start-card">
-        <h2>기본 사용</h2>
-        <p class="muted">현재 인덱스 목록/조건 선택/리더 화면을 그대로 사용합니다.</p>
-        <a class="button button-primary" href="#/browse" ${inProgress ? 'aria-disabled="true" style="pointer-events:none;opacity:0.55;"' : ""}>기본 사용 시작</a>
-      </div>
-
-      <div class="start-card">
-        <h2>그룹 스터디</h2>
+      <section class="home-card home-card-study" aria-labelledby="study-card-title">
+        <h2 id="study-card-title">유저 스터디</h2>
         <label class="field-label" for="participant-id">참가자 ID</label>
-        <input id="participant-id" class="text-input" placeholder="예: P001" ${inProgress ? "disabled" : ""}>
+        <input id="participant-id" class="text-input" placeholder="예: P001">
         <div class="group-buttons">
-          <button class="button" data-group-start="1" ${inProgress ? "disabled" : ""}>그룹 1</button>
-          <button class="button" data-group-start="2" ${inProgress ? "disabled" : ""}>그룹 2</button>
-          <button class="button" data-group-start="3" ${inProgress ? "disabled" : ""}>그룹 3</button>
-          <button class="button" data-group-start="4" ${inProgress ? "disabled" : ""}>그룹 4</button>
+          <button class="button" data-group-start="1">그룹 1</button>
+          <button class="button" data-group-start="2">그룹 2</button>
+          <button class="button" data-group-start="3">그룹 3</button>
+          <button class="button" data-group-start="4">그룹 4</button>
         </div>
-      </div>
-    </div>
+      </section>
 
-    <div class="start-actions">
-      <a class="button" href="#/records">저장 데이터</a>
-      <button class="button" id="reset-storage-btn">브라우저 저장 데이터 초기화</button>
-    </div>
+      <a class="home-card home-card-action" href="#/records">
+        <span class="home-card-title">유저 스터디 결과</span>
+      </a>
+    </section>
   `,
     {
-      screenClass: "list-screen",
-      leadingHtml: '<span class="app-mark">HCI TXT Reader</span>',
+      screenClass: "home-screen",
+      leadingHtml: "",
     }
   );
 
@@ -1059,18 +1029,6 @@ function renderStartHome() {
       startStudy(groupId, participantId);
     });
   });
-
-  const resetButton = app.querySelector("#reset-storage-btn");
-  if (resetButton) {
-    resetButton.addEventListener("click", () => {
-      const ok = window.confirm("브라우저에 저장된 스터디 세션/기록을 모두 초기화할까요?");
-      if (!ok) {
-        return;
-      }
-      resetStudyStorage();
-      renderStartHome();
-    });
-  }
 }
 
 function getStage(session) {
@@ -1813,7 +1771,6 @@ function renderCompletedStudy(session) {
     <div class="start-actions">
       <button class="button button-primary" id="download-csv-btn">CSV 다운로드</button>
       <a class="button" href="#/records">저장 데이터</a>
-      <button class="button" id="clear-study-btn">브라우저 저장 데이터 초기화</button>
       <a class="button" href="#/start">시작 화면으로</a>
     </div>
   `,
@@ -1836,18 +1793,6 @@ function renderCompletedStudy(session) {
       const timestamp = new Date().toISOString().slice(0, 19).replaceAll(":", "-");
       downloadCsv(`hci-study-results-${timestamp}.csv`, content);
       incrementTotalDownloadCount({ bulk: true });
-    });
-  }
-
-  const clearBtn = app.querySelector("#clear-study-btn");
-  if (clearBtn) {
-    clearBtn.addEventListener("click", () => {
-      const ok = window.confirm("브라우저에 저장된 스터디 세션/기록을 모두 초기화할까요?");
-      if (!ok) {
-        return;
-      }
-      resetStudyStorage();
-      window.location.hash = "#/start";
     });
   }
 }
@@ -1940,7 +1885,7 @@ function renderRecordsScreen() {
 
     <div class="start-actions">
       <button class="button button-primary" id="download-all-records-btn">전체 CSV 다운로드</button>
-      <button class="button" id="clear-all-records-btn">전체 초기화</button>
+      <button class="button" id="clear-all-records-btn">세션+기록 전체 초기화</button>
       <a class="button" href="#/start">시작 화면으로</a>
     </div>
 

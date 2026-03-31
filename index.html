@@ -89,7 +89,7 @@
       }
 
       .panel {
-        width: min(1060px, 100%);
+        width: min(1200px, 100%);
       }
 
       .screen {
@@ -105,6 +105,18 @@
       .screen.error-screen {
         max-width: 760px;
         margin: 0 auto;
+      }
+
+      .screen.home-screen {
+        max-width: 1160px;
+        margin: 0 auto;
+        border: none;
+        background: transparent;
+        box-shadow: none;
+        padding: 0;
+        min-height: calc(100vh - clamp(32px, 8vw, 68px));
+        display: flex;
+        flex-direction: column;
       }
 
       .screen.reader-screen {
@@ -257,6 +269,113 @@
       .start-card h2 {
         margin: 0 0 10px;
         font-size: 1.05rem;
+      }
+
+      .home-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+        align-items: stretch;
+        flex: 1;
+        align-content: center;
+      }
+
+      .home-card {
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.07), transparent 45%),
+          linear-gradient(155deg, var(--surface), var(--surface-soft));
+        box-shadow: var(--shadow);
+        min-height: clamp(280px, 30vw, 360px);
+      }
+
+      body[data-theme="light"] .home-card {
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.8), transparent 42%),
+          linear-gradient(155deg, #ececef, #d9dadf);
+      }
+
+      .home-card-action {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: clamp(26px, 4vw, 40px);
+        text-align: center;
+        text-decoration: none;
+        color: inherit;
+        transition: transform 180ms ease;
+      }
+
+      .home-card-action:hover {
+        transform: scale(1.02);
+        border-color: var(--line);
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.07), transparent 45%),
+          linear-gradient(155deg, var(--surface), var(--surface-soft));
+      }
+
+      .home-card-action:focus-visible {
+        outline: 3px solid rgba(71, 121, 230, 0.75);
+        outline-offset: 4px;
+      }
+
+      body[data-theme="light"] .home-card-action:hover {
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.8), transparent 42%),
+          linear-gradient(155deg, #ececef, #d9dadf);
+      }
+
+      .home-card-title {
+        display: block;
+        font-size: clamp(2rem, 3vw, 2.9rem);
+        font-weight: 800;
+        line-height: 1.18;
+        letter-spacing: -0.03em;
+      }
+
+      .home-card-study {
+        padding: clamp(24px, 3.4vw, 34px);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        transition: transform 180ms ease;
+      }
+
+      .home-card-study:hover {
+        transform: scale(1.02);
+      }
+
+      .home-card-study h2 {
+        margin: 0 0 10px;
+        font-size: clamp(1.45rem, 2vw, 1.9rem);
+      }
+
+      .home-card-study .field-label {
+        margin-top: 0;
+      }
+
+      .home-card-study .text-input {
+        min-height: 50px;
+        font-size: 1rem;
+      }
+
+      .home-card-study .group-buttons {
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .home-card-study .group-buttons .button {
+        width: 100%;
+        min-height: 48px;
+        font-weight: 700;
+        transition: transform 180ms ease;
+      }
+
+      .home-card-study .group-buttons .button:hover {
+        background: var(--btn-bg);
+        border-color: var(--line);
+        transform: scale(1.02);
       }
 
       .group-buttons {
@@ -572,12 +691,23 @@
           padding: 0 10px;
         }
 
-        .start-grid {
+        .start-grid,
+        .home-grid {
           grid-template-columns: 1fr;
+          flex: none;
+          align-content: start;
         }
 
         .group-buttons {
           grid-template-columns: 1fr;
+        }
+
+        .home-card {
+          min-height: 220px;
+        }
+
+        .home-card-study {
+          min-height: 0;
         }
 
         .study-next-wrap {
