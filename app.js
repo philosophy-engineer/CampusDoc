@@ -67,6 +67,46 @@ const LIKERT_ITEMS = [
   "긴 문서를 읽을 때 이 인터페이스를 사용할 의향이 있다.",
 ];
 
+const FINAL_SURVEY_QUESTIONS = [
+  {
+    field: "mostNaturalCondition",
+    type: "condition_select",
+    prompt: "어떤 조건이 가장 자연스러웠나?",
+    missingMessage: "가장 자연스러운 조건을 선택해 주세요.",
+  },
+  {
+    field: "mouseFollowBurden",
+    type: "long_text",
+    prompt: "마우스를 따라 가는 것이 부담이었나?",
+    missingMessage: "마우스를 따라 가는 것이 부담이었는지 작성해 주세요.",
+  },
+  {
+    field: "arrowKeyFlow",
+    type: "long_text",
+    prompt: "방향키 이동이 안정감을 줬나, 아니면 흐름을 깨뜨렸나?",
+    missingMessage: "방향키 이동에 대한 의견을 작성해 주세요.",
+  },
+  {
+    field: "conditionPreferenceRank",
+    type: "rank_with_reason",
+    orderField: "conditionPreferenceOrder",
+    prompt: "네 조건의 선호도 순서를 정하고 그 이유를 적어 주세요.",
+    missingMessage: "조건 선호도 순서와 이유를 모두 작성해 주세요.",
+  },
+  {
+    field: "leastFatigueCondition",
+    type: "condition_select",
+    prompt: "어떤 조건에서 가장 덜 피로했나?",
+    missingMessage: "가장 덜 피로했던 조건을 선택해 주세요.",
+  },
+  {
+    field: "easiestRefindCondition",
+    type: "condition_select",
+    prompt: "어떤 조건에서 정보를 다시 찾기 가장 쉬웠나?",
+    missingMessage: "정보를 다시 찾기 가장 쉬웠던 조건을 선택해 주세요.",
+  },
+];
+
 const PHASES = {
   TUTORIAL: "tutorial",
   MAIN_READING: "main_reading",
@@ -1011,7 +1051,7 @@ function createStudySession({ participantId, groupId }) {
     currentStageIndex: 0,
     currentPhase: PHASES.TUTORIAL,
     stages,
-    finalSurvey: null,
+    finalSurvey: createFinalSurveyState(),
   };
 }
 
@@ -1180,6 +1220,19 @@ function isLikertScoreSelected(score) {
   return Number.isInteger(numericScore) && numericScore >= 1 && numericScore <= 5;
 }
 
+function createFinalSurveyState() {
+  return {
+    mostNaturalCondition: "",
+    mouseFollowBurden: "",
+    arrowKeyFlow: "",
+    conditionPreferenceOrder: [],
+    conditionPreferenceRank: "",
+    leastFatigueCondition: "",
+    easiestRefindCondition: "",
+    currentQuestionIndex: 0,
+  };
+}
+
 function createQuizState() {
   return {
     view: "quiz",
@@ -1255,6 +1308,56 @@ function ensureLikertStateStructure(likertState) {
   const nextIndex = Math.min(maxIndex, Math.max(0, Number(likertState.currentItemIndex || 0)));
   if (likertState.currentItemIndex !== nextIndex) {
     likertState.currentItemIndex = nextIndex;
+    dirty = true;
+  }
+
+  return dirty;
+}
+
+function ensureFinalSurveyStateStructure(finalSurveyState) {
+  const base = createFinalSurveyState();
+  let dirty = false;
+
+  Object.entries(base).forEach(([key, defaultValue]) => {
+    if (finalSurveyState[key] == null) {
+      finalSurveyState[key] = defaultValue;
+      dirty = true;
+    }
+  });
+
+  FINAL_SURVEY_QUESTIONS.forEach((question) => {
+    if (question.type === "condition_select") {
+      const normalized = VALID_CONDITIONS.includes(finalSurveyState[question.field]) ? finalSurveyState[question.field] : "";
+      if (finalSurveyState[question.field] !== normalized) {
+        finalSurveyState[question.field] = normalized;
+        dirty = true;
+      }
+    } else if (question.type === "rank_with_reason") {
+      const rawOrder = Array.isArray(finalSurveyState[question.orderField]) ? finalSurveyState[question.orderField] : [];
+      const normalizedOrder = rawOrder.filter((value, index) => VALID_CONDITIONS.includes(value) && rawOrder.indexOf(value) === index);
+      if (JSON.stringify(rawOrder) !== JSON.stringify(normalizedOrder)) {
+        finalSurveyState[question.orderField] = normalizedOrder;
+        dirty = true;
+      }
+
+      const normalizedReason = String(finalSurveyState[question.field] || "");
+      if (finalSurveyState[question.field] !== normalizedReason) {
+        finalSurveyState[question.field] = normalizedReason;
+        dirty = true;
+      }
+    } else {
+      const normalized = String(finalSurveyState[question.field] || "");
+      if (finalSurveyState[question.field] !== normalized) {
+        finalSurveyState[question.field] = normalized;
+        dirty = true;
+      }
+    }
+  });
+
+  const maxIndex = Math.max(FINAL_SURVEY_QUESTIONS.length, 0);
+  const nextIndex = Math.min(maxIndex, Math.max(0, Number(finalSurveyState.currentQuestionIndex || 0)));
+  if (finalSurveyState.currentQuestionIndex !== nextIndex) {
+    finalSurveyState.currentQuestionIndex = nextIndex;
     dirty = true;
   }
 
@@ -1569,6 +1672,118 @@ function runLikertPageEntryAnimation(direction) {
       }
     );
   }
+}
+
+function animateFinalSurveyPageExit(direction, onComplete) {
+  const page = app.querySelector(".final-survey-page");
+  const currentDot = app.querySelector(".final-progress-dot.is-current");
+  if (!page) {
+    onComplete();
+    return;
+  }
+
+  const offset = direction === "next" ? -32 : 32;
+  let finished = false;
+  const finishOnce = () => {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    onComplete();
+  };
+
+  page
+    .animate(
+      [
+        { transform: "translateX(0) scale(1)", opacity: 1, filter: "blur(0px)" },
+        { transform: `translateX(${offset}px) scale(0.992)`, opacity: 0, filter: "blur(3px)" },
+      ],
+      {
+        duration: 180,
+        easing: "cubic-bezier(0.4, 0, 0.2, 1)",
+        fill: "forwards",
+      }
+    )
+    .finished.then(finishOnce, finishOnce);
+
+  if (currentDot) {
+    currentDot.animate(
+      [
+        { transform: "translateX(0) scaleX(1) scaleY(1)" },
+        { transform: `translateX(${direction === "next" ? 4 : -4}px) scaleX(0.92) scaleY(0.98)` },
+      ],
+      {
+        duration: 140,
+        easing: "cubic-bezier(0.33, 1, 0.68, 1)",
+        fill: "forwards",
+      }
+    );
+  }
+}
+
+function runFinalSurveyPageEntryAnimation(direction) {
+  const page = app.querySelector(".final-survey-page");
+  const indicator = app.querySelector(".final-indicator");
+  const currentDot = app.querySelector(".final-progress-dot.is-current");
+  if (!page) {
+    return;
+  }
+
+  const offset = direction === "next" ? 36 : -36;
+
+  page.animate(
+    [
+      { transform: `translateX(${offset}px) scale(0.992)`, opacity: 0, filter: "blur(3px)" },
+      { transform: "translateX(0) scale(1)", opacity: 1, filter: "blur(0px)" },
+    ],
+    {
+      duration: 250,
+      easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+    }
+  );
+
+  if (indicator) {
+    indicator.animate(
+      [
+        { transform: `translateX(${direction === "next" ? 3 : -3}px)` },
+        { transform: "translateX(0)" },
+      ],
+      {
+        duration: 180,
+        easing: "cubic-bezier(0.33, 1, 0.68, 1)",
+      }
+    );
+  }
+
+  if (currentDot) {
+    currentDot.animate(
+      [
+        { transform: `translateX(${direction === "next" ? -5 : 5}px) scaleX(0.88) scaleY(0.98)` },
+        { transform: "translateX(0) scaleX(1.08) scaleY(1)", offset: 0.68 },
+        { transform: "translateX(0) scaleX(1) scaleY(1)" },
+      ],
+      {
+        duration: 230,
+        easing: "cubic-bezier(0.33, 1, 0.68, 1)",
+      }
+    );
+  }
+}
+
+function isFinalSurveyQuestionAnswered(finalSurveyState, question) {
+  if (!question) {
+    return false;
+  }
+
+  const value = finalSurveyState[question.field];
+  if (question.type === "condition_select") {
+    return VALID_CONDITIONS.includes(value);
+  }
+  if (question.type === "rank_with_reason") {
+    const order = Array.isArray(finalSurveyState[question.orderField]) ? finalSurveyState[question.orderField] : [];
+    return order.length === VALID_CONDITIONS.length && Boolean(String(value || "").trim());
+  }
+  return Boolean(String(value || "").trim());
 }
 
 function markSessionCompleted(session) {
@@ -2162,10 +2377,14 @@ function renderLikertForm(session, stage, { transitionDirection = "" } = {}) {
                   <div class="likert-reason">
                     <div class="likert-reason-head">
                       <p class="likert-reason-hint">
-                        <span class="likert-reason-score ${selectedScore == null ? "is-empty" : ""}">${
-                          selectedScore == null ? "0점" : `${selectedScore}점`
-                        }</span>
-                        <span class="likert-reason-copy">을 선택한 이유를 적어 주세요.</span>
+                        ${
+                          selectedScore == null
+                            ? '<span class="likert-reason-copy">선택한 점수의 이유를 적어 주세요.</span>'
+                            : `
+                                <span class="likert-reason-score">${selectedScore}점</span>
+                                <span class="likert-reason-copy">을 선택한 이유를 적어 주세요.</span>
+                              `
+                        }
                         <span class="likert-required ${reasonRequired ? "" : "is-hidden"}">필수</span>
                       </p>
                     </div>
@@ -2261,8 +2480,14 @@ function renderLikertForm(session, stage, { transitionDirection = "" } = {}) {
     if (reasonHeadNode) {
       reasonHeadNode.innerHTML = `
         <p class="likert-reason-hint">
-          <span class="likert-reason-score ${hasScore ? "" : "is-empty"}">${hasScore ? `${numericScore}점` : "0점"}</span>
-          <span class="likert-reason-copy">을 선택한 이유를 적어 주세요.</span>
+          ${
+            hasScore
+              ? `
+                  <span class="likert-reason-score">${numericScore}점</span>
+                  <span class="likert-reason-copy">을 선택한 이유를 적어 주세요.</span>
+                `
+              : '<span class="likert-reason-copy">선택한 점수의 이유를 적어 주세요.</span>'
+          }
           <span class="likert-required ${required ? "" : "is-hidden"}">필수</span>
         </p>
       `;
@@ -2349,105 +2574,272 @@ function renderLikertForm(session, stage, { transitionDirection = "" } = {}) {
   }
 }
 
-function renderFinalSurvey(session) {
-  const current = session.finalSurvey || {
-    mostNaturalCondition: "",
-    mouseFollowBurden: "",
-    arrowKeyFlow: "",
-    conditionPreferenceRank: "",
-    leastFatigueCondition: "",
-    easiestRefindCondition: "",
-  };
+function renderFinalSurvey(session, { transitionDirection = "" } = {}) {
+  const finalSurveyState = session.finalSurvey || (session.finalSurvey = createFinalSurveyState());
+  const structureDirty = ensureFinalSurveyStateStructure(finalSurveyState);
+  if (structureDirty) {
+    persistSession(session);
+  }
 
-  const optionHtml = ['<option value="">선택</option>', ...VALID_CONDITIONS.map((c) => `<option value="${c}">${escapeHtml(formatConditionLabel(c))}</option>`)].join("");
+  const currentIndex = Math.min(Math.max(0, Number(finalSurveyState.currentQuestionIndex || 0)), FINAL_SURVEY_QUESTIONS.length);
+  if (finalSurveyState.currentQuestionIndex !== currentIndex) {
+    finalSurveyState.currentQuestionIndex = currentIndex;
+    persistSession(session);
+  }
 
-  app.innerHTML = renderScreen(
-    `
-    <h1>최종 설문</h1>
-    <div class="survey-form">
-      <label class="field-label" for="final-natural">어떤 조건이 가장 자연스러웠나?</label>
-      <select class="text-input" id="final-natural">${optionHtml}</select>
+  const isCompletionPage = currentIndex === FINAL_SURVEY_QUESTIONS.length;
+  const currentQuestion = isCompletionPage ? null : FINAL_SURVEY_QUESTIONS[currentIndex];
+  const currentValue = currentQuestion ? finalSurveyState[currentQuestion.field] || "" : "";
+  const currentOrder = currentQuestion && currentQuestion.type === "rank_with_reason"
+    ? Array.isArray(finalSurveyState[currentQuestion.orderField])
+      ? finalSurveyState[currentQuestion.orderField]
+      : []
+    : [];
 
-      <label class="field-label" for="final-mouse-burden">마우스를 따라 가는 것이 부담이었나?</label>
-      <textarea class="text-area" id="final-mouse-burden" rows="3">${escapeHtml(current.mouseFollowBurden)}</textarea>
+  const indicatorHtml = FINAL_SURVEY_QUESTIONS.map((question, index) => {
+    const answered = isFinalSurveyQuestionAnswered(finalSurveyState, question);
+    const className = [
+      "final-progress-dot",
+      index === currentIndex ? "is-current" : "",
+      answered ? "is-answered" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return `<span class="${className}" aria-hidden="true"></span>`;
+  })
+    .concat(`<span class="final-progress-dot final-progress-finish ${isCompletionPage ? "is-current" : ""}" aria-hidden="true"></span>`)
+    .join("");
 
-      <label class="field-label" for="final-arrow-flow">방향키 이동이 안정감을 줬나, 아니면 흐름을 깨뜨렸나?</label>
-      <textarea class="text-area" id="final-arrow-flow" rows="3">${escapeHtml(current.arrowKeyFlow)}</textarea>
+  const choiceGridHtml =
+    currentQuestion && currentQuestion.type === "condition_select"
+      ? `
+        <div class="final-choice-grid" role="radiogroup" aria-label="${escapeHtml(currentQuestion.prompt)}">
+          ${VALID_CONDITIONS.map(
+            (condition) => `
+              <button
+                type="button"
+                class="final-choice-card ${currentValue === condition ? "is-selected" : ""}"
+                data-final-choice="${condition}"
+                aria-pressed="${currentValue === condition}"
+              >
+                ${escapeHtml(formatConditionLabel(condition))}
+              </button>
+            `
+          ).join("")}
+        </div>
+      `
+      : "";
 
-      <label class="field-label" for="final-rank">네 조건 선호도 정렬 및 이유 서술</label>
-      <textarea class="text-area" id="final-rank" rows="4">${escapeHtml(current.conditionPreferenceRank)}</textarea>
+  const textFieldHtml =
+    currentQuestion && currentQuestion.type === "long_text"
+      ? `
+        <div class="final-textarea-wrap">
+          <textarea
+            class="text-area final-textarea"
+            id="final-textarea"
+            rows="8"
+            placeholder="답변을 적어주세요."
+          >${escapeHtml(currentValue)}</textarea>
+        </div>
+      `
+      : "";
 
-      <label class="field-label" for="final-least-fatigue">어떤 조건에서 가장 덜 피로했나?</label>
-      <select class="text-input" id="final-least-fatigue">${optionHtml}</select>
+  const rankFieldHtml =
+    currentQuestion && currentQuestion.type === "rank_with_reason"
+      ? `
+        <div class="final-rank-builder">
+          <div class="final-choice-grid final-choice-grid-rank" role="group" aria-label="조건 순서 선택">
+            ${VALID_CONDITIONS.map((condition) => {
+              const rankIndex = currentOrder.indexOf(condition);
+              const isSelected = rankIndex >= 0;
+              return `
+                <button
+                  type="button"
+                  class="final-choice-card ${isSelected ? "is-selected is-ranked" : ""}"
+                  data-final-rank-choice="${condition}"
+                  data-rank-order="${isSelected ? rankIndex + 1 : ""}"
+                  aria-pressed="${isSelected}"
+                >
+                  <span class="final-choice-card-label">${escapeHtml(formatConditionLabel(condition))}</span>
+                  <span class="final-choice-rank-badge ${isSelected ? "" : "is-hidden"}">${isSelected ? `${rankIndex + 1}위` : ""}</span>
+                </button>
+              `;
+            }).join("")}
+          </div>
+          <div class="final-textarea-wrap final-rank-reason-wrap">
+            <textarea
+              class="text-area final-textarea"
+              id="final-textarea"
+              rows="7"
+              placeholder="이유를 적어주세요."
+            >${escapeHtml(currentValue)}</textarea>
+          </div>
+        </div>
+      `
+      : "";
 
-      <label class="field-label" for="final-easiest-refind">어떤 조건에서 정보를 다시 찾기 가장 쉬웠나?</label>
-      <select class="text-input" id="final-easiest-refind">${optionHtml}</select>
-    </div>
+  const bodyHtml = `
+    <section class="final-survey-layout">
+      <section class="final-survey-shell">
+        <article class="final-survey-page ${isCompletionPage ? "is-complete" : ""}">
+          ${
+            isCompletionPage
+              ? `
+                <div class="final-complete-content">
+                  <p class="final-survey-kicker">최종 설문 완료</p>
+                  <h1 class="final-complete-title">수고하셨습니다!</h1>
+                  <p class="muted">모든 응답을 저장하고 스터디를 종료합니다.</p>
+                  <button class="button button-primary next-button" id="final-submit">설문 제출</button>
+                </div>
+              `
+              : `
+                <div class="final-survey-page-content">
+                  <div class="final-survey-page-head">
+                    <p class="final-survey-kicker">문항 ${currentIndex + 1}</p>
+                    <p class="final-survey-question">${escapeHtml(currentQuestion.prompt)}</p>
+                  </div>
+                  ${rankFieldHtml || choiceGridHtml || textFieldHtml}
+                </div>
+              `
+          }
+        </article>
 
-    <div class="study-next-wrap">
-      <button class="button button-primary next-button" id="final-submit">설문 제출</button>
-    </div>
-  `,
-    {
-      screenClass: "list-screen",
-      leadingHtml: `<span class="app-mark">그룹 ${escapeHtml(session.groupId)} · 최종 설문</span>`,
-      showThemeToggle: false,
-    }
-  );
+        <div class="final-nav">
+          ${
+            currentIndex === 0
+              ? '<div class="final-nav-spacer" aria-hidden="true"></div>'
+              : '<button class="button final-nav-button" id="final-prev">이전</button>'
+          }
+          <div class="final-indicator" aria-label="최종 설문 진행 상태">
+            ${indicatorHtml}
+          </div>
+          ${
+            isCompletionPage
+              ? '<div class="final-nav-spacer" aria-hidden="true"></div>'
+              : '<button class="button final-nav-button" id="final-next">다음</button>'
+          }
+        </div>
+      </section>
+    </section>
+  `;
+
+  app.innerHTML = renderScreen(bodyHtml, {
+    screenClass: "final-survey-screen",
+    leadingHtml: `<span class="app-mark">그룹 ${escapeHtml(session.groupId)} · 최종 설문</span>`,
+    showThemeToggle: false,
+  });
 
   bindThemeToggle();
 
-  const natural = app.querySelector("#final-natural");
-  const mouseBurden = app.querySelector("#final-mouse-burden");
-  const arrowFlow = app.querySelector("#final-arrow-flow");
-  const rank = app.querySelector("#final-rank");
-  const leastFatigue = app.querySelector("#final-least-fatigue");
-  const easiestRefind = app.querySelector("#final-easiest-refind");
+  if (transitionDirection) {
+    runFinalSurveyPageEntryAnimation(transitionDirection);
+  }
 
-  if (natural) natural.value = current.mostNaturalCondition || "";
-  if (leastFatigue) leastFatigue.value = current.leastFatigueCondition || "";
-  if (easiestRefind) easiestRefind.value = current.easiestRefindCondition || "";
+  const validateQuestion = (questionIndex, { showAlert = true } = {}) => {
+    const question = FINAL_SURVEY_QUESTIONS[questionIndex];
+    if (!question) {
+      return true;
+    }
+    const answered = isFinalSurveyQuestionAnswered(finalSurveyState, question);
+    if (!answered && showAlert) {
+      window.alert(question.missingMessage);
+    }
+    return answered;
+  };
 
-  const captureFinal = () => {
-    session.finalSurvey = {
-      mostNaturalCondition: natural ? natural.value : "",
-      mouseFollowBurden: mouseBurden ? mouseBurden.value : "",
-      arrowKeyFlow: arrowFlow ? arrowFlow.value : "",
-      conditionPreferenceRank: rank ? rank.value : "",
-      leastFatigueCondition: leastFatigue ? leastFatigue.value : "",
-      easiestRefindCondition: easiestRefind ? easiestRefind.value : "",
-    };
+  const moveToQuestion = (targetIndex, direction) => {
+    finalSurveyState.currentQuestionIndex = Math.min(Math.max(0, targetIndex), FINAL_SURVEY_QUESTIONS.length);
+    persistSession(session);
+    animateFinalSurveyPageExit(direction, () => {
+      renderFinalSurvey(session, { transitionDirection: direction });
+    });
+  };
+
+  const saveConditionChoice = (value) => {
+    if (!currentQuestion || currentQuestion.type !== "condition_select" || !VALID_CONDITIONS.includes(value)) {
+      return;
+    }
+    finalSurveyState[currentQuestion.field] = value;
+    persistSession(session);
+    renderFinalSurvey(session);
+  };
+
+  const saveTextAnswer = (value) => {
+    if (!currentQuestion || (currentQuestion.type !== "long_text" && currentQuestion.type !== "rank_with_reason")) {
+      return;
+    }
+    finalSurveyState[currentQuestion.field] = value;
     persistSession(session);
   };
 
-  [natural, mouseBurden, arrowFlow, rank, leastFatigue, easiestRefind].forEach((node) => {
-    if (!node) {
+  const saveRankChoice = (value) => {
+    if (!currentQuestion || currentQuestion.type !== "rank_with_reason" || !VALID_CONDITIONS.includes(value)) {
       return;
     }
-    node.addEventListener("change", captureFinal);
-    node.addEventListener("input", captureFinal);
+    const orderField = currentQuestion.orderField;
+    const currentList = Array.isArray(finalSurveyState[orderField]) ? [...finalSurveyState[orderField]] : [];
+    const existingIndex = currentList.indexOf(value);
+
+    if (existingIndex >= 0) {
+      currentList.splice(existingIndex, 1);
+    } else if (currentList.length < VALID_CONDITIONS.length) {
+      currentList.push(value);
+    }
+
+    finalSurveyState[orderField] = currentList;
+    persistSession(session);
+    renderFinalSurvey(session);
+  };
+
+  app.querySelectorAll("[data-final-choice]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const nextValue = node.getAttribute("data-final-choice");
+      saveConditionChoice(nextValue || "");
+    });
   });
+
+  app.querySelectorAll("[data-final-rank-choice]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const nextValue = node.getAttribute("data-final-rank-choice");
+      saveRankChoice(nextValue || "");
+    });
+  });
+
+  const textarea = app.querySelector("#final-textarea");
+  if (textarea instanceof HTMLTextAreaElement) {
+    textarea.addEventListener("input", () => {
+      saveTextAnswer(textarea.value);
+    });
+  }
+
+  const prevBtn = app.querySelector("#final-prev");
+  if (prevBtn) {
+    prevBtn.addEventListener("click", () => {
+      moveToQuestion(currentIndex - 1, "prev");
+    });
+  }
+
+  const nextBtn = app.querySelector("#final-next");
+  if (nextBtn) {
+    nextBtn.addEventListener("click", () => {
+      if (!validateQuestion(currentIndex)) {
+        return;
+      }
+      moveToQuestion(currentIndex + 1, "next");
+    });
+  }
 
   const submitBtn = app.querySelector("#final-submit");
   if (submitBtn) {
     submitBtn.addEventListener("click", () => {
-      captureFinal();
-      const f = session.finalSurvey || {};
-      if (!f.mostNaturalCondition || !f.leastFatigueCondition || !f.easiestRefindCondition) {
-        window.alert("조건 선택 문항을 모두 입력해 주세요.");
-        return;
-      }
-      if (!String(f.mouseFollowBurden || "").trim()) {
-        window.alert("마우스 부담 문항을 작성해 주세요.");
-        return;
-      }
-      if (!String(f.arrowKeyFlow || "").trim()) {
-        window.alert("방향키 이동 문항을 작성해 주세요.");
-        return;
-      }
-      if (!String(f.conditionPreferenceRank || "").trim()) {
-        window.alert("조건 선호도 정렬/이유를 작성해 주세요.");
-        return;
+      for (let index = 0; index < FINAL_SURVEY_QUESTIONS.length; index += 1) {
+        if (!validateQuestion(index, { showAlert: false })) {
+          finalSurveyState.currentQuestionIndex = index;
+          persistSession(session);
+          window.alert(FINAL_SURVEY_QUESTIONS[index].missingMessage);
+          renderFinalSurvey(session, { transitionDirection: "prev" });
+          return;
+        }
       }
 
       markSessionCompleted(session);
@@ -2532,10 +2924,14 @@ function sessionToWideRow(session) {
   });
 
   const final = session.finalSurvey || {};
+  const finalOrder = Array.isArray(final.conditionPreferenceOrder) ? final.conditionPreferenceOrder.join(" > ") : "";
   row.final_most_natural_condition = final.mostNaturalCondition || "";
   row.final_mouse_follow_burden = final.mouseFollowBurden || "";
   row.final_arrow_key_stability_or_flow = final.arrowKeyFlow || "";
-  row.final_condition_preference_rank_reason = final.conditionPreferenceRank || "";
+  row.final_condition_preference_order = finalOrder;
+  row.final_condition_preference_rank_reason = [finalOrder ? `순서: ${finalOrder}` : "", final.conditionPreferenceRank ? `이유: ${final.conditionPreferenceRank}` : ""]
+    .filter(Boolean)
+    .join(" / ");
   row.final_least_fatigue_condition = final.leastFatigueCondition || "";
   row.final_easiest_refind_condition = final.easiestRefindCondition || "";
 
