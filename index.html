@@ -119,6 +119,18 @@
         flex-direction: column;
       }
 
+      .screen.browse-screen {
+        max-width: 1160px;
+        margin: 0 auto;
+        border: none;
+        background: transparent;
+        box-shadow: none;
+        padding: 0;
+        min-height: calc(100vh - clamp(32px, 8vw, 68px));
+        display: flex;
+        flex-direction: column;
+      }
+
       .screen.reader-screen {
         border: none;
         background: transparent;
@@ -183,8 +195,10 @@
         margin: 0;
         padding: 0;
         border: 1px solid var(--line);
-        border-radius: 12px;
+        border-radius: 22px;
         overflow: hidden;
+        background: linear-gradient(155deg, var(--surface), var(--surface-soft));
+        box-shadow: var(--shadow);
       }
 
       .file-list li + li {
@@ -194,9 +208,10 @@
       .file-link {
         display: block;
         width: 100%;
-        padding: 14px 16px;
+        padding: 18px 22px;
         color: inherit;
         text-decoration: none;
+        font-size: 1.02rem;
       }
 
       .file-link:hover {
@@ -204,28 +219,134 @@
       }
 
       .controls {
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 12px 14px;
-        margin-bottom: 14px;
+        border: none;
+        padding: 0;
+        margin-bottom: 18px;
       }
 
       .controls legend {
         font-weight: 600;
-        padding: 0 4px;
+        padding: 0;
+        margin-bottom: 12px;
+        font-size: 1.04rem;
       }
 
       .radio-group {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px 12px;
-        margin-top: 8px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 0;
       }
 
       .radio-item {
+        position: relative;
+      }
+
+      .radio-item input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .radio-label {
         display: flex;
         align-items: center;
-        gap: 8px;
+        justify-content: space-between;
+        gap: 12px;
+        width: 100%;
+        min-height: 74px;
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: linear-gradient(155deg, var(--surface), var(--surface-soft));
+        box-shadow: var(--shadow);
+        cursor: pointer;
+        transition: transform 180ms ease, border-color 180ms ease;
+      }
+
+      .radio-label:hover {
+        transform: scale(1.01);
+      }
+
+      .radio-label__text {
+        font-weight: 700;
+      }
+
+      .radio-label__check {
+        width: 28px;
+        height: 28px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.95rem;
+        color: transparent;
+        background: transparent;
+        flex: none;
+      }
+
+      .radio-item input:checked + .radio-label {
+        border-color: rgba(132, 136, 146, 0.82);
+      }
+
+      .radio-item input:checked + .radio-label .radio-label__check {
+        color: #ffffff;
+        background: #6b707c;
+        border-color: #6b707c;
+      }
+
+      .radio-item input:focus-visible + .radio-label {
+        outline: 3px solid rgba(136, 140, 150, 0.38);
+        outline-offset: 4px;
+      }
+
+      .browse-layout {
+        flex: 1;
+        display: flex;
+        align-items: center;
+      }
+
+      .browse-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .browse-home-button {
+        padding: 0;
+        border: none;
+        background: transparent;
+        box-shadow: none;
+        display: inline-flex;
+        align-items: center;
+        font-weight: 800;
+        font-size: 1.15rem;
+        letter-spacing: -0.02em;
+        color: inherit;
+        text-decoration: none;
+        transform-origin: left center;
+        transition: transform 180ms ease;
+      }
+
+      .browse-home-button:hover {
+        background: transparent;
+        transform: scale(1.05);
+      }
+
+      .browse-file-guide {
+        margin: 0 0 8px;
+        font-weight: 600;
+        font-size: 1.04rem;
+        color: var(--text);
+      }
+
+      .browse-section {
+        display: grid;
+        gap: 16px;
+        width: min(960px, 100%);
+        margin: 0 auto;
       }
 
       .button {
@@ -696,6 +817,19 @@
           grid-template-columns: 1fr;
           flex: none;
           align-content: start;
+        }
+
+        .radio-group {
+          grid-template-columns: 1fr;
+        }
+
+        .browse-header {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .browse-layout {
+          display: block;
         }
 
         .group-buttons {

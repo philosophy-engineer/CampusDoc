@@ -51,6 +51,13 @@ const CONDITION_INSTRUCTION = {
   D: "조건 D: 위/아래 방향키로 줄 단위 이동합니다. 마우스 휠 스크롤은 제한됩니다.",
 };
 
+const CONDITION_SHORT_LABEL = {
+  A: "A(기본 읽기)",
+  B: "B(밑줄 안내)",
+  C: "C(줄 강조)",
+  D: "D(키보드 이동)",
+};
+
 const LIKERT_ITEMS = [
   "이 인터페이스는 줄을 놓치지 않도록 도와주었다.",
   "이 인터페이스는 내용 이해에 도움이 되었다.",
@@ -848,28 +855,33 @@ function renderList(files) {
 
   app.innerHTML = renderScreen(
     `
-    <h1>TXT 파일 목록</h1>
-    <fieldset class="controls">
-      <legend>실험 조건 선택</legend>
-      <div class="radio-group">
-        ${VALID_CONDITIONS.map(
-          (mode) => `
-            <label class="radio-item">
-              <input type="radio" name="condition" value="${mode}" ${current === mode ? "checked" : ""}>
-              <span>조건 ${mode}</span>
-            </label>
-          `
-        ).join("")}
-      </div>
-      <p class="muted">현재 선택: 조건 ${current}</p>
-    </fieldset>
+    <section class="browse-layout">
+      <section class="browse-section">
+        <fieldset class="controls">
+          <legend>실험 조건 선택</legend>
+          <div class="radio-group">
+            ${VALID_CONDITIONS.map(
+              (mode) => `
+                <label class="radio-item">
+                  <input type="radio" name="condition" value="${mode}" ${current === mode ? "checked" : ""}>
+                  <span class="radio-label">
+                    <span class="radio-label__text">${escapeHtml(CONDITION_SHORT_LABEL[mode] || mode)}</span>
+                    <span class="radio-label__check" aria-hidden="true">✓</span>
+                  </span>
+                </label>
+              `
+            ).join("")}
+          </div>
+        </fieldset>
 
-    ${items}
-    <p style="margin-top:14px;"><a class="button" href="#/start">시작 화면으로</a></p>
+        <p class="browse-file-guide">읽을 파일 선택</p>
+        ${items}
+      </section>
+    </section>
   `,
     {
-      screenClass: "list-screen",
-      leadingHtml: '<span class="app-mark">HCI TXT Reader</span>',
+      screenClass: "browse-screen",
+      leadingHtml: '<a class="browse-home-button" href="#/start">시작으로</a>',
     }
   );
   bindThemeToggle();
