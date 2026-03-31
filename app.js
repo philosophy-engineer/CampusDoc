@@ -2,7 +2,9 @@ const app = document.getElementById("app");
 
 const CONDITION_KEY = "hci_reader_condition";
 const LOGS_KEY = "hci_reader_logs";
+const THEME_KEY = "hci_reader_theme";
 const VALID_CONDITIONS = ["A", "B", "C", "D"];
+const VALID_THEMES = ["light", "dark"];
 
 const state = {
   manifest: null,
@@ -31,6 +33,74 @@ function getCondition() {
 function setCondition(next) {
   const value = VALID_CONDITIONS.includes(next) ? next : "A";
   localStorage.setItem(CONDITION_KEY, value);
+}
+
+function getTheme() {
+  const raw = localStorage.getItem(THEME_KEY);
+  return VALID_THEMES.includes(raw) ? raw : "dark";
+}
+
+function applyTheme(theme) {
+  const value = VALID_THEMES.includes(theme) ? theme : "dark";
+  document.body.dataset.theme = value;
+  return value;
+}
+
+function setTheme(next) {
+  const value = applyTheme(next);
+  localStorage.setItem(THEME_KEY, value);
+}
+
+function renderTopbar(leadingHtml = "") {
+  const theme = applyTheme(getTheme());
+  const value = theme === "dark" ? "Dark" : "Light";
+  return `
+    <header class="topbar">
+      <div class="topbar-leading">${leadingHtml}</div>
+      <button class="theme-toggle" type="button" id="theme-toggle" aria-pressed="${theme === "dark"}">
+        <span class="theme-toggle__value">${value}</span>
+      </button>
+    </header>
+  `;
+}
+
+function renderScreen(contentHtml, { screenClass = "", leadingHtml = "" } = {}) {
+  return `
+    <section class="screen ${screenClass}">
+      ${renderTopbar(leadingHtml)}
+      ${contentHtml}
+    </section>
+  `;
+}
+
+function bindThemeToggle() {
+  const toggle = app.querySelector("#theme-toggle");
+  if (!toggle) {
+    return;
+  }
+
+  const valueNode = toggle.querySelector(".theme-toggle__value");
+
+  const syncLabel = () => {
+    const current = applyTheme(getTheme());
+    const next = current === "dark" ? "light" : "dark";
+    const currentText = current === "dark" ? "Dark" : "Light";
+    const nextTextKorean = next === "dark" ? "다크" : "라이트";
+
+    if (valueNode) {
+      valueNode.textContent = currentText;
+    }
+    toggle.setAttribute("aria-pressed", String(current === "dark"));
+    toggle.setAttribute("aria-label", `현재 ${currentText} 모드. 클릭하면 ${nextTextKorean} 모드로 전환됩니다.`);
+  };
+
+  syncLabel();
+
+  toggle.addEventListener("click", () => {
+    const next = getTheme() === "dark" ? "light" : "dark";
+    setTheme(next);
+    syncLabel();
+  });
 }
 
 function readLogs() {
@@ -87,18 +157,32 @@ function teardownReaderSession() {
 }
 
 function renderLoading(message) {
-  app.innerHTML = `
+  app.innerHTML = renderScreen(
+    `
     <h1>TXT 파일 목록</h1>
     <p class="muted">${escapeHtml(message)}</p>
-  `;
+  `,
+    {
+      screenClass: "status-screen",
+      leadingHtml: '<span class="app-mark">HCI TXT Reader</span>',
+    }
+  );
+  bindThemeToggle();
 }
 
 function renderError(title, message) {
-  app.innerHTML = `
+  app.innerHTML = renderScreen(
+    `
     <h1>${escapeHtml(title)}</h1>
     <p class="muted">${escapeHtml(message)}</p>
     <p><a class="button" href="#/">목록으로 돌아가기</a></p>
-  `;
+  `,
+    {
+      screenClass: "error-screen",
+      leadingHtml: '<span class="app-mark">HCI TXT Reader</span>',
+    }
+  );
+  bindThemeToggle();
 }
 
 function renderList(files) {
@@ -115,8 +199,9 @@ function renderList(files) {
           })
           .join("")}</ul>`;
 
-  app.innerHTML = `
-    <h1>HCI TXT Reader</h1>
+  app.innerHTML = renderScreen(
+    `
+    <h1>TXT 파일 목록</h1>
     <fieldset class="controls">
       <legend>실험 조건 선택</legend>
       <div class="radio-group">
@@ -137,9 +222,14 @@ function renderList(files) {
       <button class="button" type="button" id="clear-logs">로그 초기화</button>
     </div>
 
-    <h1>TXT 파일 목록</h1>
     ${items}
-  `;
+  `,
+    {
+      screenClass: "list-screen",
+      leadingHtml: '<span class="app-mark">HCI TXT Reader</span>',
+    }
+  );
+  bindThemeToggle();
 
   app.querySelectorAll('input[name="condition"]').forEach((radio) => {
     radio.addEventListener("change", (event) => {
@@ -236,21 +326,31 @@ function renderReader(name, content, condition) {
   const conditionLabel = `Condition ${condition}`;
   const modeClass = condition === "B" ? "mode-b" : condition === "C" ? "mode-c" : condition === "D" ? "mode-d" : "";
 
-  app.innerHTML = `
-    <div class="actions">
-      <a class="button" href="#/">뒤로가기</a>
-    </div>
-    <span class="badge">${conditionLabel}</span>
-    <h1>${escapeHtml(name)}</h1>
-    <p class="muted">리더 화면에서는 조건 변경이 잠금됩니다.</p>
+  app.innerHTML = renderScreen(
+    `
+    <div class="reader-stage">
+      <article class="reader-paper">
+        <div class="reader-paper-head">
+          <span class="badge">${conditionLabel}</span>
+          <h1>${escapeHtml(name)}</h1>
+          <p class="reader-hint">리더 화면에서는 조건 변경이 잠금됩니다.</p>
+        </div>
 
-    <div class="reader-frame">
-      <div class="reader-scroll ${condition === "D" ? "mode-d" : ""}" id="reader-scroll" tabindex="0">
-        <div class="line-overlay ${modeClass}" id="line-overlay"></div>
-        <div class="reader-text" id="reader-text"></div>
-      </div>
+        <div class="reader-frame">
+          <div class="reader-scroll ${condition === "D" ? "mode-d" : ""}" id="reader-scroll" tabindex="0">
+            <div class="line-overlay ${modeClass}" id="line-overlay"></div>
+            <div class="reader-text" id="reader-text"></div>
+          </div>
+        </div>
+      </article>
     </div>
-  `;
+  `,
+    {
+      screenClass: "reader-screen",
+      leadingHtml: '<a class="button back-button" href="#/">뒤로가기</a>',
+    }
+  );
+  bindThemeToggle();
 
   const readerScroll = app.querySelector("#reader-scroll");
   const readerText = app.querySelector("#reader-text");
@@ -498,20 +598,37 @@ function renderReader(name, content, condition) {
     return showHighlightAtRange(range, safeY, preserveOnFail);
   }
 
-  function ensureVisible(top, height) {
-    const margin = 28;
-    const currentTop = readerScroll.scrollTop;
-    const viewTop = currentTop + margin;
-    const viewBottom = currentTop + readerScroll.clientHeight - margin;
-
-    if (top < viewTop) {
-      readerScroll.scrollTop = Math.max(0, top - margin);
-      return;
+  function scrollPageBy(deltaY) {
+    if (!Number.isFinite(deltaY) || deltaY === 0) {
+      return 0;
     }
 
-    const bottom = top + height;
-    if (bottom > viewBottom) {
-      readerScroll.scrollTop = Math.max(0, bottom - readerScroll.clientHeight + margin);
+    const before = window.scrollY;
+    window.scrollBy(0, deltaY);
+    const actual = window.scrollY - before;
+
+    if (actual !== 0 && lineState.lastClientY != null) {
+      lineState.lastClientY -= actual;
+    }
+
+    return actual;
+  }
+
+  function ensureVisible(top, height) {
+    const margin = 84;
+    const scrollRect = readerScroll.getBoundingClientRect();
+    const lineTop = scrollRect.top + top;
+    const lineBottom = lineTop + height;
+    let delta = 0;
+
+    if (lineTop < margin) {
+      delta = lineTop - margin;
+    } else if (lineBottom > window.innerHeight - margin) {
+      delta = lineBottom - (window.innerHeight - margin);
+    }
+
+    if (Math.abs(delta) >= 1) {
+      scrollPageBy(delta);
     }
   }
 
@@ -522,14 +639,14 @@ function renderReader(name, content, condition) {
 
     let baseY;
     if (lineState.lastClientY == null) {
-      baseY = scrollRect.top + Math.min(lineState.lineHeight, scrollRect.height - 8);
+      baseY = scrollRect.top + lineState.lineHeight;
     } else {
       baseY = lineState.lastClientY + direction * lineState.lineHeight;
     }
 
     const previousTop = lineState.contentTop;
-    let minY = Math.max(scrollRect.top + 6, textRect.top + 2);
-    let maxY = Math.min(scrollRect.bottom - 6, textRect.bottom - 2);
+    let minY = Math.max(8, scrollRect.top + 6, textRect.top + 2);
+    let maxY = Math.min(window.innerHeight - 8, scrollRect.bottom - 6, textRect.bottom - 2);
     if (minY >= maxY) {
       return;
     }
@@ -551,11 +668,14 @@ function renderReader(name, content, condition) {
       probeY += direction * lineState.lineHeight;
 
       if (probeY < minY || probeY > maxY) {
-        readerScroll.scrollTop = Math.max(0, readerScroll.scrollTop + direction * lineState.lineHeight);
+        const actualScroll = scrollPageBy(direction * lineState.lineHeight);
+        if (actualScroll === 0) {
+          break;
+        }
         scrollRect = readerScroll.getBoundingClientRect();
         textRect = readerText.getBoundingClientRect();
-        minY = Math.max(scrollRect.top + 6, textRect.top + 2);
-        maxY = Math.min(scrollRect.bottom - 6, textRect.bottom - 2);
+        minY = Math.max(8, scrollRect.top + 6, textRect.top + 2);
+        maxY = Math.min(window.innerHeight - 8, scrollRect.bottom - 6, textRect.bottom - 2);
         if (minY >= maxY) {
           break;
         }
@@ -572,6 +692,16 @@ function renderReader(name, content, condition) {
     if (lineState.contentTop != null) {
       ensureVisible(lineState.contentTop, lineOverlay.getBoundingClientRect().height || lineState.lineHeight);
     }
+  }
+
+  function initializeDStartLine() {
+    window.scrollTo(0, 0);
+
+    const scrollRect = readerScroll.getBoundingClientRect();
+    const textRect = readerText.getBoundingClientRect();
+    const x = scrollRect.left + 30;
+    const y = Math.max(scrollRect.top + lineState.lineHeight, textRect.top + 2);
+    updateHighlightFromPoint(x, y, false);
   }
 
   const cleanups = [];
@@ -612,13 +742,17 @@ function renderReader(name, content, condition) {
     };
 
     readerScroll.addEventListener("keydown", onKeyDown);
-    readerScroll.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("wheel", onWheel, { passive: false, capture: true });
 
-    readerScroll.focus();
-    stepByArrow(1);
+    try {
+      readerScroll.focus({ preventScroll: true });
+    } catch {
+      readerScroll.focus();
+    }
+    initializeDStartLine();
 
     cleanups.push(() => readerScroll.removeEventListener("keydown", onKeyDown));
-    cleanups.push(() => readerScroll.removeEventListener("wheel", onWheel));
+    cleanups.push(() => window.removeEventListener("wheel", onWheel, { capture: true }));
   } else {
     hideHighlight();
   }
@@ -717,6 +851,7 @@ async function renderRoute() {
 
 window.addEventListener("hashchange", renderRoute);
 window.addEventListener("DOMContentLoaded", () => {
+  applyTheme(getTheme());
   if (!window.location.hash) {
     window.location.hash = "#/";
     return;
