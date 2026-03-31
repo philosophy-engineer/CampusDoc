@@ -231,6 +231,229 @@
         background: var(--btn-bg-hover);
       }
 
+      .button-primary {
+        background: #2f6fe5;
+        border-color: #2f6fe5;
+        color: #ffffff;
+      }
+
+      .button-primary:hover {
+        background: #255dc4;
+      }
+
+      .start-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 14px;
+      }
+
+      .start-card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px;
+      }
+
+      .start-card h2 {
+        margin: 0 0 10px;
+        font-size: 1.05rem;
+      }
+
+      .group-buttons {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .start-actions {
+        margin-top: 14px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .study-resume-box {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        margin: 12px 0;
+      }
+
+      .field-label {
+        display: block;
+        margin-top: 10px;
+        margin-bottom: 6px;
+        font-size: 0.95rem;
+      }
+
+      .text-input,
+      .text-area,
+      select.text-input {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--btn-bg);
+        color: var(--text);
+        padding: 10px 12px;
+        font: inherit;
+      }
+
+      .text-area {
+        resize: vertical;
+      }
+
+      .study-meta {
+        width: min(840px, 100%);
+        margin: 0 auto 12px;
+      }
+
+      .study-next-wrap {
+        position: fixed;
+        right: clamp(10px, 3vw, 28px);
+        bottom: clamp(10px, 3vw, 28px);
+        z-index: 20;
+      }
+
+      .next-button {
+        min-width: 96px;
+        padding: 10px 16px;
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.42);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 30;
+        padding: 16px;
+      }
+
+      .modal-backdrop.hidden {
+        display: none;
+      }
+
+      .modal-card {
+        width: min(560px, 100%);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: linear-gradient(155deg, var(--surface), var(--surface-soft));
+        box-shadow: var(--shadow);
+        padding: 18px;
+      }
+
+      .modal-card h2 {
+        margin-top: 0;
+        margin-bottom: 10px;
+      }
+
+      .tab-buttons {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .quiz-card,
+      .likert-card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 10px;
+      }
+
+      .quiz-card h3 {
+        margin: 0 0 8px;
+        font-size: 1rem;
+      }
+
+      .quiz-options {
+        display: grid;
+        gap: 8px;
+      }
+
+      .quiz-option {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .quiz-option input {
+        margin-top: 3px;
+      }
+
+      .likert-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        margin-bottom: 8px;
+      }
+
+      .likert-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .survey-form {
+        display: grid;
+        gap: 8px;
+      }
+
+      .records-list {
+        margin-top: 14px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .record-item {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+      }
+
+      .record-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .record-head p {
+        margin: 0;
+      }
+
+      .record-actions {
+        margin-top: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .record-details {
+        margin-top: 8px;
+      }
+
+      .record-details summary {
+        cursor: pointer;
+      }
+
+      .record-stage-list {
+        margin: 8px 0 0;
+        padding-left: 18px;
+      }
+
+      .record-stage-list li {
+        margin-bottom: 4px;
+      }
+
+      .empty-state {
+        border: 1px dashed var(--line);
+        border-radius: 12px;
+        padding: 14px;
+      }
+
       .badge {
         display: inline-block;
         border: 1px solid rgba(75, 131, 232, 0.35);
@@ -347,6 +570,19 @@
         .theme-toggle {
           min-width: 80px;
           padding: 0 10px;
+        }
+
+        .start-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .group-buttons {
+          grid-template-columns: 1fr;
+        }
+
+        .study-next-wrap {
+          right: 10px;
+          bottom: 10px;
         }
       }
     </style>
