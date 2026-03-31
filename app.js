@@ -907,7 +907,7 @@ function renderBasicReader(name, content, condition) {
   `,
     {
       screenClass: "reader-screen",
-      leadingHtml: '<a class="button back-button" href="#/browse">뒤로가기</a>',
+      leadingHtml: '<a class="browse-home-button" href="#/start">시작으로</a>',
     }
   );
   bindThemeToggle();
