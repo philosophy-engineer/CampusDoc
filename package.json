@@ -32,7 +32,6 @@
     "files": [
       "app.js",
       "index.html",
-      "files/**/*",
       "electron/**/*",
       "package.json"
     ],
