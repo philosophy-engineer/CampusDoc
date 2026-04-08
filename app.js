@@ -19,6 +19,9 @@ const state = {
   readerCleanup: null,
 };
 
+const campusDocFilesApi = window.campusDoc?.files ?? null;
+const isElectronDesktop = Boolean(campusDocFilesApi);
+
 function isSafeTxtFilename(name) {
   return typeof name === "string" && /^[^/\\]+\.txt$/i.test(name);
 }
@@ -34,6 +37,26 @@ function escapeHtml(value) {
 
 function formatFilenameForDisplay(name) {
   return String(name).replace(/\.txt$/i, "").replaceAll("-", " ");
+}
+
+function formatDateTimeForDisplay(isoString) {
+  if (!isoString) {
+    return "-";
+  }
+
+  const parsed = new Date(isoString);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(isoString);
+  }
+
+  return new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed);
+}
+
+function isLikelyDocId(value) {
+  return typeof value === "string" && /^[a-z0-9-]{8,64}$/i.test(value);
 }
 
 function getCondition() {
@@ -681,11 +704,12 @@ function mountReader({ content, condition, idPrefix = "reader", onArrow }) {
 }
 
 function renderStartHome() {
+  const homeLabel = isElectronDesktop ? "문서 작업 시작" : "기본 사용";
   app.innerHTML = renderScreen(
     `
     <section class="home-grid" aria-label="시작 옵션">
       <a class="home-card home-card-action" href="#/browse">
-        <span class="home-card-title">기본 사용</span>
+        <span class="home-card-title">${homeLabel}</span>
       </a>
     </section>
   `,
@@ -752,6 +776,182 @@ function renderList(files) {
   });
 }
 
+function renderDesktopList(docs) {
+  const items =
+    docs.length === 0
+      ? '<p class="muted">아직 문서가 없습니다. TXT를 가져오거나 새 문서를 만들어 주세요.</p>'
+      : `<ul class="doc-list">${docs
+          .map((doc) => {
+            return `
+              <li class="doc-list-item">
+                <a class="doc-open-link" href="#/file/${encodeURIComponent(doc.docId)}">${escapeHtml(doc.title)}</a>
+                <p class="doc-list-meta">수정: ${escapeHtml(formatDateTimeForDisplay(doc.updatedAt))}</p>
+              </li>
+            `;
+          })
+          .join("")}</ul>`;
+
+  app.innerHTML = renderScreen(
+    `
+      <section class="browse-layout">
+        <section class="browse-section">
+          <header class="browse-header">
+            <p class="browse-file-guide">내 작업 문서</p>
+            <div class="desktop-actions">
+              <button class="button" type="button" id="desktop-import">TXT 가져오기</button>
+              <button class="button button-primary" type="button" id="desktop-create">새 문서</button>
+            </div>
+          </header>
+          ${items}
+        </section>
+      </section>
+    `,
+    {
+      screenClass: "browse-screen",
+      leadingHtml: '<a class="browse-home-button" href="#/start">시작으로</a>',
+    }
+  );
+  bindThemeToggle();
+
+  const importButton = app.querySelector("#desktop-import");
+  if (importButton) {
+    importButton.addEventListener("click", async () => {
+      importButton.setAttribute("disabled", "true");
+      try {
+        const imported = await campusDocFilesApi.importTxt();
+        if (imported && imported.docId) {
+          window.location.hash = `#/file/${encodeURIComponent(imported.docId)}`;
+          return;
+        }
+        renderRoute();
+      } catch (error) {
+        renderError("TXT 가져오기 실패", error.message || "파일을 가져오지 못했습니다.");
+      } finally {
+        importButton.removeAttribute("disabled");
+      }
+    });
+  }
+
+  const createButton = app.querySelector("#desktop-create");
+  if (createButton) {
+    createButton.addEventListener("click", async () => {
+      const titleInput = window.prompt("새 문서 제목을 입력해 주세요.", "새 문서");
+      if (titleInput === null) {
+        return;
+      }
+
+      createButton.setAttribute("disabled", "true");
+      try {
+        const created = await campusDocFilesApi.createDoc(titleInput);
+        if (created?.docId) {
+          window.location.hash = `#/file/${encodeURIComponent(created.docId)}`;
+          return;
+        }
+        renderRoute();
+      } catch (error) {
+        renderError("문서 생성 실패", error.message || "새 문서를 만들지 못했습니다.");
+      } finally {
+        createButton.removeAttribute("disabled");
+      }
+    });
+  }
+}
+
+function renderDesktopEditor(meta, content) {
+  app.innerHTML = renderScreen(
+    `
+      <section class="editor-layout">
+        <header class="editor-header">
+          <div>
+            <h1>${escapeHtml(meta.title)}</h1>
+            <p class="muted">문서 ID: ${escapeHtml(meta.docId)}</p>
+          </div>
+          <div class="desktop-actions">
+            <button class="button" type="button" id="desktop-export">Export TXT</button>
+            <button class="button button-primary" type="button" id="desktop-save">저장</button>
+          </div>
+        </header>
+
+        <label class="editor-label" for="desktop-editor">내용</label>
+        <textarea id="desktop-editor" class="editor-textarea" spellcheck="false"></textarea>
+
+        <p class="editor-status muted" id="desktop-status"></p>
+      </section>
+    `,
+    {
+      screenClass: "reader-screen",
+      leadingHtml: '<a class="browse-home-button" href="#/browse">문서 목록으로</a>',
+    }
+  );
+  bindThemeToggle();
+
+  const editor = app.querySelector("#desktop-editor");
+  const saveButton = app.querySelector("#desktop-save");
+  const exportButton = app.querySelector("#desktop-export");
+  const statusNode = app.querySelector("#desktop-status");
+  if (!editor || !saveButton || !exportButton || !statusNode) {
+    return;
+  }
+
+  let savedContent = content;
+  editor.value = content;
+
+  const syncStatus = (message = "") => {
+    const dirty = editor.value !== savedContent;
+    const base = `최근 수정: ${formatDateTimeForDisplay(meta.updatedAt)}`;
+    const dirtyText = dirty ? "저장되지 않은 변경 사항이 있습니다." : "저장 완료 상태입니다.";
+    statusNode.textContent = [base, dirtyText, message].filter(Boolean).join("  ");
+  };
+
+  syncStatus();
+
+  const doSave = async () => {
+    saveButton.setAttribute("disabled", "true");
+    try {
+      const result = await campusDocFilesApi.saveDoc(meta.docId, editor.value);
+      savedContent = editor.value;
+      if (result?.updatedAt) {
+        meta.updatedAt = result.updatedAt;
+      }
+      syncStatus("저장했습니다.");
+    } catch (error) {
+      syncStatus("저장 실패");
+      window.alert(error.message || "저장에 실패했습니다.");
+    } finally {
+      saveButton.removeAttribute("disabled");
+    }
+  };
+
+  saveButton.addEventListener("click", doSave);
+  editor.addEventListener("input", () => {
+    syncStatus();
+  });
+  editor.addEventListener("keydown", (event) => {
+    const isSaveKey = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
+    if (!isSaveKey) {
+      return;
+    }
+    event.preventDefault();
+    doSave();
+  });
+
+  exportButton.addEventListener("click", async () => {
+    exportButton.setAttribute("disabled", "true");
+    try {
+      const result = await campusDocFilesApi.exportTxt(meta.docId);
+      if (result?.outputPath) {
+        syncStatus(`내보내기 완료: ${result.outputPath}`);
+      } else {
+        syncStatus("내보내기를 취소했습니다.");
+      }
+    } catch (error) {
+      window.alert(error.message || "내보내기에 실패했습니다.");
+    } finally {
+      exportButton.removeAttribute("disabled");
+    }
+  });
+}
+
 function renderBasicReader(name, content, condition) {
   app.innerHTML = renderScreen(
     `
@@ -773,6 +973,47 @@ function renderBasicReader(name, content, condition) {
     condition,
     idPrefix: "basic-reader",
   });
+}
+
+async function renderDesktopRoute(route) {
+  if (route.type === "legacy_redirect") {
+    window.location.hash = "#/start";
+    return;
+  }
+
+  if (route.type === "invalid") {
+    renderError("잘못된 경로입니다.", "시작 화면으로 이동해 주세요.");
+    return;
+  }
+
+  if (route.type === "start") {
+    renderStartHome();
+    return;
+  }
+
+  if (route.type === "browse") {
+    renderLoading("문서 목록을 불러오는 중...");
+    try {
+      const docs = await campusDocFilesApi.listDocs();
+      renderDesktopList(docs);
+    } catch (error) {
+      renderError("문서 목록 로딩 실패", error.message || "문서 목록을 가져오지 못했습니다.");
+    }
+    return;
+  }
+
+  if (!isLikelyDocId(route.name)) {
+    renderError("잘못된 문서 ID입니다.", "문서 목록으로 돌아가 다시 선택해 주세요.");
+    return;
+  }
+
+  renderLoading("문서를 여는 중...");
+  try {
+    const result = await campusDocFilesApi.readDoc(route.name);
+    renderDesktopEditor(result.meta, result.content);
+  } catch (error) {
+    renderError("문서 열기 실패", error.message || "문서를 열 수 없습니다.");
+  }
 }
 
 async function loadManifest() {
@@ -815,6 +1056,11 @@ async function renderRoute() {
   teardownReaderSession();
 
   const route = routeFromHash();
+  if (isElectronDesktop) {
+    await renderDesktopRoute(route);
+    return;
+  }
+
   if (route.type === "legacy_redirect") {
     window.location.hash = "#/start";
     return;
