@@ -7,24 +7,20 @@ const VALID_CONDITIONS = ["A", "B", "C", "D"];
 const VALID_THEMES = ["light", "dark"];
 
 const CONDITION_SHORT_LABEL = {
-  A: "A(기본 읽기)",
+  A: "A(기본)",
   B: "B(밑줄 안내)",
   C: "C(줄 강조)",
-  D: "D(키보드 이동)",
+  D: "D(키보드 줄 강조)",
 };
 
 const state = {
-  manifest: null,
-  manifestPromise: null,
-  readerCleanup: null,
+  screenCleanup: null,
+  settingsModal: null,
+  settingsListeners: new Set(),
 };
 
 const campusDocFilesApi = window.campusDoc?.files ?? null;
 const isElectronDesktop = Boolean(campusDocFilesApi);
-
-function isSafeTxtFilename(name) {
-  return typeof name === "string" && /^[^/\\]+\.txt$/i.test(name);
-}
 
 function escapeHtml(value) {
   return String(value)
@@ -33,10 +29,6 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
-}
-
-function formatFilenameForDisplay(name) {
-  return String(name).replace(/\.txt$/i, "").replaceAll("-", " ");
 }
 
 function formatDateTimeForDisplay(isoString) {
@@ -67,6 +59,8 @@ function getCondition() {
 function setCondition(next) {
   const value = VALID_CONDITIONS.includes(next) ? next : "A";
   localStorage.setItem(CONDITION_KEY, value);
+  notifySettingsChanged();
+  return value;
 }
 
 function getTheme() {
@@ -83,62 +77,217 @@ function applyTheme(theme) {
 function setTheme(next) {
   const value = applyTheme(next);
   localStorage.setItem(THEME_KEY, value);
+  notifySettingsChanged();
+  return value;
 }
 
-function renderTopbar(leadingHtml = "", { showThemeToggle = true } = {}) {
-  const theme = applyTheme(getTheme());
-  const value = theme === "dark" ? "Dark" : "Light";
+function subscribeSettings(listener) {
+  state.settingsListeners.add(listener);
+  return () => {
+    state.settingsListeners.delete(listener);
+  };
+}
+
+function notifySettingsChanged() {
+  const payload = {
+    condition: getCondition(),
+    theme: getTheme(),
+  };
+
+  state.settingsListeners.forEach((listener) => {
+    try {
+      listener(payload);
+    } catch {
+      // ignore listener errors and keep the app responsive
+    }
+  });
+}
+
+function renderTopbar(leadingHtml = "", { showSettingsButton = true } = {}) {
   return `
     <header class="topbar">
       <div class="topbar-leading">${leadingHtml}</div>
-      ${
-        showThemeToggle
-          ? `<button class="theme-toggle" type="button" id="theme-toggle" aria-pressed="${theme === "dark"}">
-              <span class="theme-toggle__value">${value}</span>
-            </button>`
-          : ""
-      }
+      <div class="topbar-actions">
+        ${
+          showSettingsButton
+            ? '<button class="topbar-action" type="button" id="open-settings-button">설정</button>'
+            : ""
+        }
+      </div>
     </header>
   `;
 }
 
-function renderScreen(contentHtml, { screenClass = "", leadingHtml = "", showThemeToggle = true } = {}) {
+function renderScreen(contentHtml, { screenClass = "", leadingHtml = "", showSettingsButton = true } = {}) {
   return `
     <section class="screen ${screenClass}">
-      ${renderTopbar(leadingHtml, { showThemeToggle })}
+      ${renderTopbar(leadingHtml, { showSettingsButton })}
       ${contentHtml}
     </section>
   `;
 }
 
-function bindThemeToggle() {
-  const toggle = app.querySelector("#theme-toggle");
-  if (!toggle) {
+function bindTopbarActions() {
+  const settingsButton = app.querySelector("#open-settings-button");
+  if (settingsButton) {
+    settingsButton.addEventListener("click", openSettingsModal);
+  }
+}
+
+function ensureSettingsModal() {
+  if (state.settingsModal) {
+    return state.settingsModal;
+  }
+
+  const modeOptions = VALID_CONDITIONS.map((mode) => {
+    return `
+      <label class="radio-item">
+        <input type="radio" name="settings-condition" value="${mode}">
+        <span class="radio-label">
+          <span class="radio-label__text">${escapeHtml(CONDITION_SHORT_LABEL[mode] || mode)}</span>
+          <span class="radio-label__check" aria-hidden="true">✓</span>
+        </span>
+      </label>
+    `;
+  }).join("");
+
+  const node = document.createElement("div");
+  node.className = "settings-modal hidden";
+  node.innerHTML = `
+    <div class="settings-modal__backdrop" data-close-settings="true"></div>
+    <section class="settings-modal__panel" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+      <header class="settings-modal__header">
+        <h2 id="settings-modal-title">앱 설정</h2>
+        <button class="button" type="button" data-close-settings="true">닫기</button>
+      </header>
+
+      <section class="settings-block" aria-label="테마 설정">
+        <p class="settings-block__title">Theme</p>
+        <div class="settings-inline-options" role="radiogroup" aria-label="테마 선택">
+          <label><input type="radio" name="settings-theme" value="dark"> Dark</label>
+          <label><input type="radio" name="settings-theme" value="light"> Light</label>
+        </div>
+      </section>
+
+      <section class="settings-block" aria-label="읽기 모드 설정">
+        <p class="settings-block__title">Reading Mode</p>
+        <div class="radio-group" role="radiogroup" aria-label="읽기 모드 선택">
+          ${modeOptions}
+        </div>
+      </section>
+    </section>
+  `;
+
+  document.body.append(node);
+  state.settingsModal = node;
+
+  node.querySelectorAll('[data-close-settings="true"]').forEach((closeTarget) => {
+    closeTarget.addEventListener("click", closeSettingsModal);
+  });
+
+  node.querySelectorAll('input[name="settings-theme"]').forEach((input) => {
+    input.addEventListener("change", (event) => {
+      setTheme(event.target.value);
+    });
+  });
+
+  node.querySelectorAll('input[name="settings-condition"]').forEach((input) => {
+    input.addEventListener("change", (event) => {
+      setCondition(event.target.value);
+    });
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.settingsModal && !state.settingsModal.classList.contains("hidden")) {
+      closeSettingsModal();
+    }
+  });
+
+  return node;
+}
+
+function syncSettingsModalInputs() {
+  const modal = ensureSettingsModal();
+  const currentTheme = getTheme();
+  const currentCondition = getCondition();
+
+  modal.querySelectorAll('input[name="settings-theme"]').forEach((input) => {
+    input.checked = input.value === currentTheme;
+  });
+
+  modal.querySelectorAll('input[name="settings-condition"]').forEach((input) => {
+    input.checked = input.value === currentCondition;
+  });
+}
+
+function openSettingsModal() {
+  const modal = ensureSettingsModal();
+  syncSettingsModalInputs();
+  modal.classList.remove("hidden");
+
+  const focusTarget = modal.querySelector('input[name="settings-condition"]:checked') || modal.querySelector("button");
+  if (focusTarget) {
+    focusTarget.focus();
+  }
+}
+
+function closeSettingsModal() {
+  if (!state.settingsModal) {
     return;
   }
 
-  const valueNode = toggle.querySelector(".theme-toggle__value");
+  state.settingsModal.classList.add("hidden");
+}
 
-  const syncLabel = () => {
-    const current = applyTheme(getTheme());
-    const next = current === "dark" ? "light" : "dark";
-    const currentText = current === "dark" ? "Dark" : "Light";
-    const nextTextKorean = next === "dark" ? "다크" : "라이트";
+function teardownScreenSession() {
+  if (typeof state.screenCleanup === "function") {
+    state.screenCleanup();
+  }
+  state.screenCleanup = null;
+}
 
-    if (valueNode) {
-      valueNode.textContent = currentText;
+function renderLoading(message) {
+  app.innerHTML = renderScreen(
+    `
+    <h1>CampusDoc</h1>
+    <p class="muted">${escapeHtml(message)}</p>
+  `,
+    {
+      screenClass: "status-screen",
+      leadingHtml: '<span class="app-mark">CampusDoc Desktop</span>',
     }
-    toggle.setAttribute("aria-pressed", String(current === "dark"));
-    toggle.setAttribute("aria-label", `현재 ${currentText} 모드. 클릭하면 ${nextTextKorean} 모드로 전환됩니다.`);
-  };
+  );
+  bindTopbarActions();
+}
 
-  syncLabel();
+function renderError(title, message) {
+  app.innerHTML = renderScreen(
+    `
+    <h1>${escapeHtml(title)}</h1>
+    <p class="muted">${escapeHtml(message)}</p>
+    <p><a class="button" href="#/start">시작 화면으로</a></p>
+  `,
+    {
+      screenClass: "error-screen",
+      leadingHtml: '<span class="app-mark">CampusDoc Desktop</span>',
+    }
+  );
+  bindTopbarActions();
+}
 
-  toggle.addEventListener("click", () => {
-    const next = getTheme() === "dark" ? "light" : "dark";
-    setTheme(next);
-    syncLabel();
-  });
+function renderElectronOnlyNotice() {
+  app.innerHTML = renderScreen(
+    `
+      <h1>Electron 실행이 필요합니다.</h1>
+      <p class="muted">이 앱은 Desktop(Electron) 전용으로 동작합니다.</p>
+      <p class="muted">프로젝트 루트에서 <code>npm run dev</code> 또는 <code>npm start</code>로 실행해 주세요.</p>
+    `,
+    {
+      screenClass: "status-screen",
+      leadingHtml: '<span class="app-mark">CampusDoc Desktop</span>',
+    }
+  );
+  bindTopbarActions();
 }
 
 function routeFromHash() {
@@ -168,612 +317,22 @@ function routeFromHash() {
   return { type: "invalid" };
 }
 
-function teardownReaderSession() {
-  if (typeof state.readerCleanup === "function") {
-    state.readerCleanup();
-    state.readerCleanup = null;
-  }
-}
-
-function renderLoading(message, { showThemeToggle = true } = {}) {
-  app.innerHTML = renderScreen(
-    `
-    <h1>CampusDoc Reader</h1>
-    <p class="muted">${escapeHtml(message)}</p>
-  `,
-    {
-      screenClass: "status-screen",
-      leadingHtml: '<span class="app-mark">CampusDoc TXT Reader</span>',
-      showThemeToggle,
-    }
-  );
-  bindThemeToggle();
-}
-
-function renderError(title, message) {
-  app.innerHTML = renderScreen(
-    `
-    <h1>${escapeHtml(title)}</h1>
-    <p class="muted">${escapeHtml(message)}</p>
-    <p><a class="button" href="#/start">시작 화면으로</a></p>
-  `,
-    {
-      screenClass: "error-screen",
-      leadingHtml: '<span class="app-mark">CampusDoc TXT Reader</span>',
-    }
-  );
-  bindThemeToggle();
-}
-
-function getCaretRangeFromPoint(x, y) {
-  if (typeof document.caretRangeFromPoint === "function") {
-    return document.caretRangeFromPoint(x, y);
-  }
-
-  if (typeof document.caretPositionFromPoint === "function") {
-    const pos = document.caretPositionFromPoint(x, y);
-    if (!pos) {
-      return null;
-    }
-    const range = document.createRange();
-    range.setStart(pos.offsetNode, pos.offset);
-    range.setEnd(pos.offsetNode, pos.offset);
-    return range;
-  }
-
-  return null;
-}
-
-function getRangeRect(range, preferredY) {
-  const rects = Array.from(range.getClientRects()).filter((rect) => rect.height > 0);
-  if (rects.length > 0) {
-    const pickedOnLine = rects.find((rect) => preferredY >= rect.top && preferredY < rect.bottom);
-    const picked =
-      pickedOnLine ||
-      rects.reduce((best, rect) => {
-        if (!best) {
-          return rect;
-        }
-        const bestDist = Math.abs(preferredY - (best.top + best.height / 2));
-        const currentDist = Math.abs(preferredY - (rect.top + rect.height / 2));
-        return currentDist < bestDist ? rect : best;
-      }, null);
-    return picked;
-  }
-
-  const fallback = range.getBoundingClientRect();
-  return fallback.height > 0 ? fallback : null;
-}
-
-function estimateLineHeight(element) {
-  const styles = window.getComputedStyle(element);
-  const raw = styles.lineHeight;
-  if (raw.endsWith("px")) {
-    const parsed = Number.parseFloat(raw);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-  }
-  const fontSize = Number.parseFloat(styles.fontSize) || 16;
-  return fontSize * 1.6;
-}
-
-function isTextNode(node) {
-  return node && node.nodeType === Node.TEXT_NODE;
-}
-
-function setupConditionInteraction(readerScroll, readerText, lineOverlay, condition, { onArrow } = {}) {
-  const lineState = {
-    anchorX: null,
-    lastClientY: null,
-    contentTop: null,
-    lineHeight: estimateLineHeight(readerText),
-  };
-  let dInitFrame1 = 0;
-  let dInitFrame2 = 0;
-
-  function hideHighlight() {
-    lineOverlay.style.display = "none";
-  }
-
-  function isRangeInsideReader(range) {
-    const node = range.startContainer;
-    return readerText.contains(node) || node === readerText;
-  }
-
-  function getExpandedRect(range, clientY) {
-    const direct = getRangeRect(range, clientY);
-    if (direct && direct.width >= 1) {
-      return direct;
-    }
-
-    const node = range.startContainer;
-    const offset = range.startOffset;
-    const probe = document.createRange();
-
-    if (isTextNode(node)) {
-      const len = node.textContent.length;
-      const candidates = [];
-      if (offset < len) {
-        candidates.push([offset, offset + 1]);
-      }
-      if (offset > 0) {
-        candidates.push([offset - 1, offset]);
-      }
-
-      for (const [start, end] of candidates) {
-        probe.setStart(node, start);
-        probe.setEnd(node, end);
-        const rect = getRangeRect(probe, clientY);
-        if (rect && rect.width >= 1) {
-          return rect;
-        }
-      }
-    }
-
-    return direct;
-  }
-
-  function isSameVisualLine(a, b) {
-    const midA = a.top + a.height / 2;
-    const midB = b.top + b.height / 2;
-    const tolerance = Math.max(4, Math.min(a.height, b.height) * 0.7);
-    return Math.abs(midA - midB) <= tolerance;
-  }
-
-  function measureLineSpan(seedRect, clientY) {
-    const textRect = readerText.getBoundingClientRect();
-    const leftLimit = Math.max(textRect.left, 0);
-    const rightLimit = textRect.right;
-    const step = 4;
-
-    let minLeft = seedRect.left;
-    let maxRight = seedRect.right;
-
-    let misses = 0;
-    for (let x = seedRect.left - step; x >= leftLimit; x -= step) {
-      const probeRange = getCaretRangeFromPoint(x, clientY);
-      if (!probeRange || !isRangeInsideReader(probeRange)) {
-        misses += 1;
-        if (misses > 10) {
-          break;
-        }
-        continue;
-      }
-
-      const probeRect = getExpandedRect(probeRange, clientY);
-      if (!probeRect || probeRect.width < 1 || !isSameVisualLine(probeRect, seedRect)) {
-        misses += 1;
-        if (misses > 10) {
-          break;
-        }
-        continue;
-      }
-
-      minLeft = Math.min(minLeft, probeRect.left);
-      misses = 0;
-    }
-
-    misses = 0;
-    for (let x = seedRect.right + step; x <= rightLimit; x += step) {
-      const probeRange = getCaretRangeFromPoint(x, clientY);
-      if (!probeRange || !isRangeInsideReader(probeRange)) {
-        misses += 1;
-        if (misses > 10) {
-          break;
-        }
-        continue;
-      }
-
-      const probeRect = getExpandedRect(probeRange, clientY);
-      if (!probeRect || probeRect.width < 1 || !isSameVisualLine(probeRect, seedRect)) {
-        misses += 1;
-        if (misses > 10) {
-          break;
-        }
-        continue;
-      }
-
-      maxRight = Math.max(maxRight, probeRect.right);
-      misses = 0;
-    }
-
-    return {
-      left: minLeft,
-      right: maxRight,
-    };
-  }
-
-  function showHighlightAtRange(range, clientY, preserveOnFail = false) {
-    if (!isRangeInsideReader(range)) {
-      if (!preserveOnFail) {
-        hideHighlight();
-      }
-      return false;
-    }
-
-    const rect = getExpandedRect(range, clientY);
-    if (!rect || rect.width < 1) {
-      if (!preserveOnFail) {
-        hideHighlight();
-      }
-      return false;
-    }
-
-    const samplingY = rect.top + rect.height / 2;
-    const span = measureLineSpan(rect, samplingY);
-    const spanWidth = Math.max(1, span.right - span.left);
-
-    const scrollRect = readerScroll.getBoundingClientRect();
-    const top = rect.top - scrollRect.top + readerScroll.scrollTop;
-    const left = span.left - scrollRect.left + readerScroll.scrollLeft;
-    const height = rect.height || lineState.lineHeight;
-    const textRect = readerText.getBoundingClientRect();
-    const textLeft = textRect.left - scrollRect.left + readerScroll.scrollLeft;
-    const textRight = textRect.right - scrollRect.left + readerScroll.scrollLeft;
-
-    const paddedLeft = Math.max(textLeft, left - 1);
-    const paddedRight = Math.min(textRight, left + spanWidth + 1);
-    const finalWidth = Math.max(1, paddedRight - paddedLeft);
-
-    lineOverlay.style.left = `${Math.max(0, paddedLeft)}px`;
-    lineOverlay.style.width = `${finalWidth}px`;
-    lineOverlay.style.top = `${Math.max(0, top)}px`;
-    lineOverlay.style.height = `${Math.max(8, height)}px`;
-    lineOverlay.style.display = "block";
-
-    lineState.anchorX = lineState.anchorX ?? rect.left + 6;
-    lineState.lastClientY = rect.top + rect.height / 2;
-    lineState.contentTop = top;
-
-    return true;
-  }
-
-  function updateHighlightFromPoint(clientX, clientY, preserveOnFail = false) {
-    const textRect = readerText.getBoundingClientRect();
-    if (textRect.height <= 0) {
-      if (!preserveOnFail) {
-        hideHighlight();
-      }
-      return false;
-    }
-
-    const minTextY = textRect.top + 1;
-    const maxTextY = textRect.bottom - 1;
-    const safeY = maxTextY > minTextY ? Math.min(maxTextY, Math.max(minTextY, clientY)) : clientY;
-
-    const range = getCaretRangeFromPoint(clientX, safeY);
-    if (!range) {
-      if (!preserveOnFail) {
-        hideHighlight();
-      }
-      return false;
-    }
-
-    const node = range.startContainer;
-    if (!readerText.contains(node) && node !== readerText) {
-      if (!preserveOnFail) {
-        hideHighlight();
-      }
-      return false;
-    }
-
-    lineState.anchorX = clientX;
-    return showHighlightAtRange(range, safeY, preserveOnFail);
-  }
-
-  function scrollPageBy(deltaY) {
-    if (!Number.isFinite(deltaY) || deltaY === 0) {
-      return 0;
-    }
-
-    const before = window.scrollY;
-    window.scrollBy(0, deltaY);
-    const actual = window.scrollY - before;
-
-    if (actual !== 0 && lineState.lastClientY != null) {
-      lineState.lastClientY -= actual;
-    }
-
-    return actual;
-  }
-
-  function ensureVisible(top, height) {
-    const margin = 84;
-    const scrollRect = readerScroll.getBoundingClientRect();
-    const lineTop = scrollRect.top + top;
-    const lineBottom = lineTop + height;
-    let delta = 0;
-
-    if (lineTop < margin) {
-      delta = lineTop - margin;
-    } else if (lineBottom > window.innerHeight - margin) {
-      delta = lineBottom - (window.innerHeight - margin);
-    }
-
-    if (Math.abs(delta) >= 1) {
-      scrollPageBy(delta);
-    }
-  }
-
-  function stepByArrow(direction) {
-    let scrollRect = readerScroll.getBoundingClientRect();
-    let textRect = readerText.getBoundingClientRect();
-    const x = lineState.anchorX ?? scrollRect.left + 30;
-
-    let baseY;
-    if (lineState.lastClientY == null) {
-      baseY = scrollRect.top + lineState.lineHeight;
-    } else {
-      baseY = lineState.lastClientY + direction * lineState.lineHeight;
-    }
-
-    const previousTop = lineState.contentTop;
-    let minY = Math.max(8, scrollRect.top + 6, textRect.top + 2);
-    let maxY = Math.min(window.innerHeight - 8, scrollRect.bottom - 6, textRect.bottom - 2);
-    if (minY >= maxY) {
-      return;
-    }
-
-    let probeY = Math.min(maxY, Math.max(minY, baseY));
-    let moved = false;
-
-    for (let attempt = 0; attempt < 14; attempt += 1) {
-      const ok = updateHighlightFromPoint(x, probeY, true);
-      const progressed =
-        previousTop == null || lineState.contentTop == null || Math.abs(lineState.contentTop - previousTop) >= 1;
-
-      if (ok && progressed) {
-        moved = true;
-        break;
-      }
-
-      probeY += direction * lineState.lineHeight;
-
-      if (probeY < minY || probeY > maxY) {
-        const actualScroll = scrollPageBy(direction * lineState.lineHeight);
-        if (actualScroll === 0) {
-          break;
-        }
-        scrollRect = readerScroll.getBoundingClientRect();
-        textRect = readerText.getBoundingClientRect();
-        minY = Math.max(8, scrollRect.top + 6, textRect.top + 2);
-        maxY = Math.min(window.innerHeight - 8, scrollRect.bottom - 6, textRect.bottom - 2);
-        if (minY >= maxY) {
-          break;
-        }
-      }
-
-      probeY = Math.min(maxY, Math.max(minY, probeY));
-    }
-
-    if (!moved && lineState.contentTop == null) {
-      hideHighlight();
-      return;
-    }
-
-    if (lineState.contentTop != null) {
-      ensureVisible(lineState.contentTop, lineOverlay.getBoundingClientRect().height || lineState.lineHeight);
-    }
-  }
-
-  function initializeDStartLine() {
-    window.scrollTo(0, 0);
-
-    const scrollRect = readerScroll.getBoundingClientRect();
-    const textRect = readerText.getBoundingClientRect();
-    const x = scrollRect.left + 30;
-    const y = Math.max(scrollRect.top + 12, textRect.top + 2);
-    updateHighlightFromPoint(x, y, false);
-  }
-
-  function scheduleDStartLine() {
-    if (dInitFrame1) {
-      cancelAnimationFrame(dInitFrame1);
-    }
-    if (dInitFrame2) {
-      cancelAnimationFrame(dInitFrame2);
-    }
-
-    dInitFrame1 = requestAnimationFrame(() => {
-      dInitFrame1 = 0;
-      dInitFrame2 = requestAnimationFrame(() => {
-        dInitFrame2 = 0;
-        initializeDStartLine();
-      });
-    });
-  }
-
-  const cleanups = [];
-
-  if (condition === "B" || condition === "C") {
-    const onMove = (event) => {
-      updateHighlightFromPoint(event.clientX, event.clientY);
-    };
-
-    readerScroll.addEventListener("mousemove", onMove);
-    cleanups.push(() => readerScroll.removeEventListener("mousemove", onMove));
-  } else if (condition === "D") {
-    const onKeyDown = (event) => {
-      if (event.__hciDKeyHandled) {
-        return;
-      }
-
-      if (event.key === "ArrowUp") {
-        event.__hciDKeyHandled = true;
-        event.preventDefault();
-        if (typeof onArrow === "function") {
-          onArrow(-1);
-        }
-        stepByArrow(-1);
-        return;
-      }
-
-      if (event.key === "ArrowDown") {
-        event.__hciDKeyHandled = true;
-        event.preventDefault();
-        if (typeof onArrow === "function") {
-          onArrow(1);
-        }
-        stepByArrow(1);
-        return;
-      }
-
-      if (event.key === " " || event.key === "PageUp" || event.key === "PageDown") {
-        event.__hciDKeyHandled = true;
-        event.preventDefault();
-      }
-    };
-
-    const onWheel = (event) => {
-      event.preventDefault();
-    };
-
-    readerScroll.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keydown", onKeyDown, { capture: true });
-    window.addEventListener("wheel", onWheel, { passive: false, capture: true });
-
-    try {
-      readerScroll.focus({ preventScroll: true });
-    } catch {
-      readerScroll.focus();
-    }
-
-    scheduleDStartLine();
-
-    cleanups.push(() => readerScroll.removeEventListener("keydown", onKeyDown));
-    cleanups.push(() => window.removeEventListener("keydown", onKeyDown, { capture: true }));
-    cleanups.push(() => window.removeEventListener("wheel", onWheel, { capture: true }));
-    cleanups.push(() => {
-      if (dInitFrame1) {
-        cancelAnimationFrame(dInitFrame1);
-      }
-      if (dInitFrame2) {
-        cancelAnimationFrame(dInitFrame2);
-      }
-    });
-  } else {
-    hideHighlight();
-  }
-
-  const onClickFocus = () => {
-    try {
-      readerScroll.focus({ preventScroll: true });
-    } catch {
-      readerScroll.focus();
-    }
-  };
-  readerScroll.addEventListener("click", onClickFocus);
-  cleanups.push(() => readerScroll.removeEventListener("click", onClickFocus));
-
-  return () => {
-    cleanups.forEach((fn) => fn());
-  };
-}
-
-function buildReaderBlock({ title, condition, idPrefix = "reader" }) {
-  const modeClass = condition === "B" ? "mode-b" : condition === "C" ? "mode-c" : condition === "D" ? "mode-d" : "";
-  return `
-    <div class="reader-stage">
-      <article class="reader-paper">
-        <div class="reader-paper-head">
-          <h1>${escapeHtml(title)}</h1>
-        </div>
-        <div class="reader-frame">
-          <div class="reader-scroll ${condition === "D" ? "mode-d" : ""}" id="${idPrefix}-scroll" tabindex="0">
-            <div class="line-overlay ${modeClass}" id="${idPrefix}-overlay"></div>
-            <div class="reader-text" id="${idPrefix}-text"></div>
-          </div>
-        </div>
-      </article>
-    </div>
-  `;
-}
-
-function mountReader({ content, condition, idPrefix = "reader", onArrow }) {
-  const readerScroll = app.querySelector(`#${idPrefix}-scroll`);
-  const readerText = app.querySelector(`#${idPrefix}-text`);
-  const lineOverlay = app.querySelector(`#${idPrefix}-overlay`);
-
-  if (!readerScroll || !readerText || !lineOverlay) {
-    return () => {};
-  }
-
-  readerText.textContent = content;
-  return setupConditionInteraction(readerScroll, readerText, lineOverlay, condition, { onArrow });
-}
-
 function renderStartHome() {
-  const homeLabel = isElectronDesktop ? "문서 작업 시작" : "기본 사용";
   app.innerHTML = renderScreen(
     `
     <section class="home-grid" aria-label="시작 옵션">
       <a class="home-card home-card-action" href="#/browse">
-        <span class="home-card-title">${homeLabel}</span>
+        <span class="home-card-title">문서 작업 시작</span>
       </a>
     </section>
   `,
     {
       screenClass: "home-screen",
-      leadingHtml: "",
+      leadingHtml: '<span class="app-mark">CampusDoc Desktop</span>',
     }
   );
-  bindThemeToggle();
-}
 
-function renderList(files) {
-  const current = getCondition();
-  const items =
-    files.length === 0
-      ? '<p class="muted">표시할 txt 파일이 없습니다.</p>'
-      : `<ul class="file-list">${files
-          .map((name) => {
-            const encoded = encodeURIComponent(name);
-            const displayName = formatFilenameForDisplay(name);
-            return `<li><a class="file-link" href="#/file/${encoded}">${escapeHtml(displayName)}</a></li>`;
-          })
-          .join("")}</ul>`;
-
-  app.innerHTML = renderScreen(
-    `
-    <section class="browse-layout">
-      <section class="browse-section">
-        <fieldset class="controls">
-          <legend>읽기 모드 선택</legend>
-          <div class="radio-group">
-            ${VALID_CONDITIONS.map(
-              (mode) => `
-                <label class="radio-item">
-                  <input type="radio" name="condition" value="${mode}" ${current === mode ? "checked" : ""}>
-                  <span class="radio-label">
-                    <span class="radio-label__text">${escapeHtml(CONDITION_SHORT_LABEL[mode] || mode)}</span>
-                    <span class="radio-label__check" aria-hidden="true">✓</span>
-                  </span>
-                </label>
-              `
-            ).join("")}
-          </div>
-        </fieldset>
-
-        <p class="browse-file-guide">읽을 파일 선택</p>
-        ${items}
-      </section>
-    </section>
-  `,
-    {
-      screenClass: "browse-screen",
-      leadingHtml: '<a class="browse-home-button" href="#/start">시작으로</a>',
-    }
-  );
-  bindThemeToggle();
-
-  app.querySelectorAll('input[name="condition"]').forEach((radio) => {
-    radio.addEventListener("change", (event) => {
-      const value = event.target.value;
-      setCondition(value);
-      renderList(files);
-    });
-  });
+  bindTopbarActions();
 }
 
 function renderDesktopList(docs) {
@@ -811,7 +370,8 @@ function renderDesktopList(docs) {
       leadingHtml: '<a class="browse-home-button" href="#/start">시작으로</a>',
     }
   );
-  bindThemeToggle();
+
+  bindTopbarActions();
 
   const importButton = app.querySelector("#desktop-import");
   if (importButton) {
@@ -857,7 +417,296 @@ function renderDesktopList(docs) {
   }
 }
 
+function parsePixel(value, fallback = 0) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readTextAreaMetrics(textarea, caretPos) {
+  const computed = window.getComputedStyle(textarea);
+  const mirror = document.createElement("div");
+  const styleProps = [
+    "boxSizing",
+    "fontFamily",
+    "fontSize",
+    "fontWeight",
+    "fontStyle",
+    "letterSpacing",
+    "lineHeight",
+    "textTransform",
+    "textIndent",
+    "textAlign",
+    "wordSpacing",
+    "paddingTop",
+    "paddingRight",
+    "paddingBottom",
+    "paddingLeft",
+    "borderTopWidth",
+    "borderRightWidth",
+    "borderBottomWidth",
+    "borderLeftWidth",
+    "borderStyle",
+    "whiteSpace",
+    "wordBreak",
+    "overflowWrap",
+  ];
+
+  mirror.style.position = "absolute";
+  mirror.style.visibility = "hidden";
+  mirror.style.top = "0";
+  mirror.style.left = "-9999px";
+  mirror.style.height = "auto";
+  mirror.style.overflow = "hidden";
+  mirror.style.whiteSpace = "pre-wrap";
+  mirror.style.wordWrap = "break-word";
+  mirror.style.width = `${textarea.clientWidth}px`;
+
+  styleProps.forEach((prop) => {
+    mirror.style[prop] = computed[prop];
+  });
+
+  const safePos = Math.max(0, Math.min(caretPos, textarea.value.length));
+  mirror.textContent = textarea.value.slice(0, safePos);
+
+  const marker = document.createElement("span");
+  marker.textContent = "\u200b";
+  mirror.append(marker);
+
+  document.body.append(mirror);
+
+  const lineHeight = parsePixel(computed.lineHeight, parsePixel(computed.fontSize, 16) * 1.6);
+  const caretTop = marker.offsetTop;
+  const caretLeft = marker.offsetLeft;
+
+  document.body.removeChild(mirror);
+
+  const paddingTop = parsePixel(computed.paddingTop);
+  const paddingRight = parsePixel(computed.paddingRight);
+  const paddingBottom = parsePixel(computed.paddingBottom);
+  const paddingLeft = parsePixel(computed.paddingLeft);
+  const borderTop = parsePixel(computed.borderTopWidth);
+  const borderLeft = parsePixel(computed.borderLeftWidth);
+  const contentWidth = Math.max(1, textarea.clientWidth - paddingLeft - paddingRight);
+
+  return {
+    lineHeight,
+    caretTop,
+    caretLeft,
+    paddingTop,
+    paddingBottom,
+    paddingLeft,
+    borderTop,
+    borderLeft,
+    contentWidth,
+  };
+}
+
+function getLineBoundary(text, position) {
+  const safePos = Math.max(0, Math.min(position, text.length));
+  const start = text.lastIndexOf("\n", Math.max(0, safePos - 1)) + 1;
+  let end = text.indexOf("\n", safePos);
+  if (end === -1) {
+    end = text.length;
+  }
+  return {
+    start,
+    end,
+    column: safePos - start,
+  };
+}
+
+function moveCaretByLine(textarea, direction, preferredColumn) {
+  const text = textarea.value;
+  const current = getLineBoundary(text, textarea.selectionStart ?? 0);
+
+  if (direction < 0) {
+    if (current.start <= 0) {
+      return false;
+    }
+    const prevEnd = current.start - 1;
+    const prevStart = text.lastIndexOf("\n", Math.max(0, prevEnd - 1)) + 1;
+    const prevLength = prevEnd - prevStart;
+    const nextPos = prevStart + Math.min(preferredColumn, prevLength);
+    textarea.setSelectionRange(nextPos, nextPos);
+    return true;
+  }
+
+  if (current.end >= text.length) {
+    return false;
+  }
+
+  const nextStart = current.end + 1;
+  let nextEnd = text.indexOf("\n", nextStart);
+  if (nextEnd === -1) {
+    nextEnd = text.length;
+  }
+  const nextLength = nextEnd - nextStart;
+  const nextPos = nextStart + Math.min(preferredColumn, nextLength);
+  textarea.setSelectionRange(nextPos, nextPos);
+  return true;
+}
+
+function createEditorModeController(textarea, overlay) {
+  let condition = getCondition();
+  let rafId = 0;
+  let preferredColumn = null;
+
+  function hideOverlay() {
+    overlay.style.display = "none";
+    overlay.classList.remove("mode-b", "mode-c", "mode-d");
+  }
+
+  function ensureCaretInView(metrics) {
+    const lineTop = metrics.caretTop;
+    const lineBottom = lineTop + metrics.lineHeight;
+    const visibleTop = textarea.scrollTop + metrics.paddingTop;
+    const visibleBottom = textarea.scrollTop + textarea.clientHeight - metrics.paddingBottom;
+
+    if (lineTop < visibleTop + 8) {
+      const target = Math.max(0, lineTop - metrics.paddingTop - metrics.lineHeight);
+      textarea.scrollTop = target;
+      return;
+    }
+
+    if (lineBottom > visibleBottom - 8) {
+      const target = Math.max(0, lineBottom + metrics.paddingBottom - textarea.clientHeight + metrics.lineHeight);
+      textarea.scrollTop = target;
+    }
+  }
+
+  function renderOverlay() {
+    if (condition === "A" || document.activeElement !== textarea) {
+      hideOverlay();
+      return;
+    }
+
+    const caretPos = textarea.selectionStart ?? 0;
+    const metrics = readTextAreaMetrics(textarea, caretPos);
+    const relativeTop = metrics.borderTop + metrics.caretTop - textarea.scrollTop;
+
+    if (relativeTop + metrics.lineHeight < 0 || relativeTop > textarea.clientHeight) {
+      hideOverlay();
+      return;
+    }
+
+    overlay.style.display = "block";
+    overlay.style.left = `${Math.max(0, metrics.borderLeft + metrics.paddingLeft)}px`;
+    overlay.style.width = `${metrics.contentWidth}px`;
+    overlay.style.top = `${Math.max(0, relativeTop)}px`;
+    overlay.style.height = `${Math.max(8, metrics.lineHeight)}px`;
+
+    overlay.classList.toggle("mode-b", condition === "B");
+    overlay.classList.toggle("mode-c", condition === "C");
+    overlay.classList.toggle("mode-d", condition === "D");
+  }
+
+  function scheduleRender() {
+    if (rafId) {
+      return;
+    }
+    rafId = requestAnimationFrame(() => {
+      rafId = 0;
+      renderOverlay();
+    });
+  }
+
+  function handleArrowJump(event, direction) {
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+      return;
+    }
+
+    if (condition !== "D") {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (preferredColumn == null) {
+      preferredColumn = getLineBoundary(textarea.value, textarea.selectionStart ?? 0).column;
+    }
+
+    const moved = moveCaretByLine(textarea, direction, preferredColumn);
+    if (!moved) {
+      return;
+    }
+
+    const metrics = readTextAreaMetrics(textarea, textarea.selectionStart ?? 0);
+    ensureCaretInView(metrics);
+    scheduleRender();
+  }
+
+  function resetPreferredColumn() {
+    preferredColumn = null;
+  }
+
+  const onInput = () => {
+    resetPreferredColumn();
+    scheduleRender();
+  };
+  const onScroll = () => scheduleRender();
+  const onSelect = () => {
+    resetPreferredColumn();
+    scheduleRender();
+  };
+  const onFocus = () => scheduleRender();
+  const onBlur = () => hideOverlay();
+  const onPointer = () => {
+    resetPreferredColumn();
+    scheduleRender();
+  };
+  const onResize = () => scheduleRender();
+  const onKeyDown = (event) => {
+    if (event.key === "ArrowUp") {
+      handleArrowJump(event, -1);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      handleArrowJump(event, 1);
+      return;
+    }
+    if (condition === "D") {
+      resetPreferredColumn();
+    }
+  };
+
+  textarea.addEventListener("input", onInput);
+  textarea.addEventListener("scroll", onScroll);
+  textarea.addEventListener("select", onSelect);
+  textarea.addEventListener("focus", onFocus);
+  textarea.addEventListener("blur", onBlur);
+  textarea.addEventListener("click", onPointer);
+  textarea.addEventListener("keyup", onPointer);
+  textarea.addEventListener("keydown", onKeyDown);
+  window.addEventListener("resize", onResize);
+
+  scheduleRender();
+
+  return {
+    applyCondition(nextCondition) {
+      condition = VALID_CONDITIONS.includes(nextCondition) ? nextCondition : "A";
+      scheduleRender();
+    },
+    destroy() {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+      }
+      textarea.removeEventListener("input", onInput);
+      textarea.removeEventListener("scroll", onScroll);
+      textarea.removeEventListener("select", onSelect);
+      textarea.removeEventListener("focus", onFocus);
+      textarea.removeEventListener("blur", onBlur);
+      textarea.removeEventListener("click", onPointer);
+      textarea.removeEventListener("keyup", onPointer);
+      textarea.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onResize);
+      hideOverlay();
+    },
+  };
+}
+
 function renderDesktopEditor(meta, content) {
+  const currentCondition = getCondition();
+
   app.innerHTML = renderScreen(
     `
       <section class="editor-layout">
@@ -872,8 +721,13 @@ function renderDesktopEditor(meta, content) {
           </div>
         </header>
 
+        <p class="editor-mode-label">현재 읽기 모드: ${escapeHtml(CONDITION_SHORT_LABEL[currentCondition] || currentCondition)}</p>
+
         <label class="editor-label" for="desktop-editor">내용</label>
-        <textarea id="desktop-editor" class="editor-textarea" spellcheck="false"></textarea>
+        <div class="editor-textarea-wrap">
+          <textarea id="desktop-editor" class="editor-textarea" spellcheck="false"></textarea>
+          <div id="desktop-line-overlay" class="editor-line-overlay" aria-hidden="true"></div>
+        </div>
 
         <p class="editor-status muted" id="desktop-status"></p>
       </section>
@@ -883,18 +737,27 @@ function renderDesktopEditor(meta, content) {
       leadingHtml: '<a class="browse-home-button" href="#/browse">문서 목록으로</a>',
     }
   );
-  bindThemeToggle();
+
+  bindTopbarActions();
 
   const editor = app.querySelector("#desktop-editor");
+  const overlay = app.querySelector("#desktop-line-overlay");
   const saveButton = app.querySelector("#desktop-save");
   const exportButton = app.querySelector("#desktop-export");
   const statusNode = app.querySelector("#desktop-status");
-  if (!editor || !saveButton || !exportButton || !statusNode) {
+  const modeLabelNode = app.querySelector(".editor-mode-label");
+  if (!editor || !overlay || !saveButton || !exportButton || !statusNode || !modeLabelNode) {
     return;
   }
 
   let savedContent = content;
   editor.value = content;
+
+  const modeController = createEditorModeController(editor, overlay);
+  const unsubscribeSettings = subscribeSettings(({ condition }) => {
+    modeController.applyCondition(condition);
+    modeLabelNode.textContent = `현재 읽기 모드: ${CONDITION_SHORT_LABEL[condition] || condition}`;
+  });
 
   const syncStatus = (message = "") => {
     const dirty = editor.value !== savedContent;
@@ -904,6 +767,11 @@ function renderDesktopEditor(meta, content) {
   };
 
   syncStatus();
+  try {
+    editor.focus({ preventScroll: true });
+  } catch {
+    editor.focus();
+  }
 
   const doSave = async () => {
     saveButton.setAttribute("disabled", "true");
@@ -950,32 +818,23 @@ function renderDesktopEditor(meta, content) {
       exportButton.removeAttribute("disabled");
     }
   });
+
+  state.screenCleanup = () => {
+    unsubscribeSettings();
+    modeController.destroy();
+  };
 }
 
-function renderBasicReader(name, content, condition) {
-  app.innerHTML = renderScreen(
-    `
-    ${buildReaderBlock({
-      title: formatFilenameForDisplay(name),
-      condition,
-      idPrefix: "basic-reader",
-    })}
-  `,
-    {
-      screenClass: "reader-screen",
-      leadingHtml: '<a class="browse-home-button" href="#/start">시작으로</a>',
-    }
-  );
-  bindThemeToggle();
+async function renderRoute() {
+  teardownScreenSession();
 
-  state.readerCleanup = mountReader({
-    content,
-    condition,
-    idPrefix: "basic-reader",
-  });
-}
+  if (!isElectronDesktop) {
+    renderElectronOnlyNotice();
+    return;
+  }
 
-async function renderDesktopRoute(route) {
+  const route = routeFromHash();
+
   if (route.type === "legacy_redirect") {
     window.location.hash = "#/start";
     return;
@@ -1016,102 +875,10 @@ async function renderDesktopRoute(route) {
   }
 }
 
-async function loadManifest() {
-  if (state.manifest) {
-    return state.manifest;
-  }
-
-  if (!state.manifestPromise) {
-    state.manifestPromise = fetch("./files/manifest.json", { cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok) {
-          throw new Error(`manifest 요청 실패 (${res.status})`);
-        }
-        const data = await res.json();
-        if (!data || !Array.isArray(data.files)) {
-          throw new Error("manifest 형식이 올바르지 않습니다. (files 배열 필요)");
-        }
-        const sanitized = [...new Set(data.files.filter(isSafeTxtFilename))];
-        state.manifest = sanitized;
-        return sanitized;
-      })
-      .catch((error) => {
-        state.manifestPromise = null;
-        throw error;
-      });
-  }
-
-  return state.manifestPromise;
-}
-
-async function loadTxtFile(name) {
-  const res = await fetch(`./files/${encodeURIComponent(name)}`, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`파일을 불러오지 못했습니다. (${res.status})`);
-  }
-  return res.text();
-}
-
-async function renderRoute() {
-  teardownReaderSession();
-
-  const route = routeFromHash();
-  if (isElectronDesktop) {
-    await renderDesktopRoute(route);
-    return;
-  }
-
-  if (route.type === "legacy_redirect") {
-    window.location.hash = "#/start";
-    return;
-  }
-
-  if (route.type === "invalid") {
-    renderError("잘못된 경로입니다.", "시작 화면으로 이동해 주세요.");
-    return;
-  }
-
-  if (route.type === "start") {
-    renderStartHome();
-    return;
-  }
-
-  renderLoading("로딩 중...");
-
-  let files;
-  try {
-    files = await loadManifest();
-  } catch (error) {
-    renderError("목록을 불러올 수 없습니다.", error.message);
-    return;
-  }
-
-  if (route.type === "browse") {
-    renderList(files);
-    return;
-  }
-
-  if (!isSafeTxtFilename(route.name)) {
-    renderError("잘못된 파일명입니다.", "요청한 파일명을 확인해 주세요.");
-    return;
-  }
-
-  if (!files.includes(route.name)) {
-    renderError("파일을 찾을 수 없습니다.", "manifest 목록에 없는 파일입니다.");
-    return;
-  }
-
-  try {
-    const text = await loadTxtFile(route.name);
-    renderBasicReader(route.name, text, getCondition());
-  } catch (error) {
-    renderError("파일 로딩 실패", error.message);
-  }
-}
-
 window.addEventListener("hashchange", renderRoute);
 window.addEventListener("DOMContentLoaded", () => {
   applyTheme(getTheme());
+  ensureSettingsModal();
 
   if (!window.location.hash || window.location.hash === "#/" || window.location.hash === "#") {
     window.location.hash = "#/start";
