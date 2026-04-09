@@ -424,64 +424,71 @@
       }
 
       .editor-layout {
-        max-width: 1040px;
+        max-width: 920px;
         margin: 0 auto;
-        border: 1px solid var(--line);
-        border-radius: 22px;
-        background: linear-gradient(155deg, var(--surface), var(--surface-soft));
-        box-shadow: var(--shadow);
-        padding: clamp(18px, 3vw, 28px);
         display: grid;
         gap: 12px;
+      }
+
+      .editor-top-actions {
+        width: min(840px, 100%);
+        margin: 0 auto;
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .editor-paper {
+        width: min(840px, 100%);
+        margin: 0 auto;
+      }
+
+      .editor-paper-head {
+        padding-bottom: 12px;
       }
 
       .editor-header {
         display: flex;
         align-items: flex-start;
-        justify-content: space-between;
+        justify-content: flex-start;
         gap: 14px;
         flex-wrap: wrap;
       }
 
-      .editor-label {
-        font-weight: 700;
-      }
-
-      .editor-mode-label {
-        margin: 0;
-        font-size: 0.92rem;
-        color: var(--muted);
-      }
-
       .editor-textarea-wrap {
         position: relative;
+        min-height: 56vh;
+        max-height: none;
+        overflow: auto;
+        padding: clamp(16px, 3.2vw, 36px) clamp(18px, 3.4vw, 40px);
+        line-height: 1.78;
+        font-size: clamp(16px, 1.15vw, 18px);
+        cursor: text;
       }
 
       .editor-textarea {
-        width: 100%;
-        min-height: 56vh;
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 14px;
-        resize: vertical;
-        background: var(--paper-bg);
+        margin: 0;
+        min-height: calc(56vh - 2px);
+        white-space: pre-wrap;
+        word-break: break-word;
         color: var(--paper-text);
         font-family: "SUIT Variable", "Pretendard Variable", "Noto Sans KR", -apple-system, sans-serif;
-        font-size: 1rem;
-        line-height: 1.6;
+        line-height: inherit;
+        font-size: inherit;
         position: relative;
         z-index: 2;
+        outline: none;
+        cursor: text;
+      }
+
+      .editor-textarea:focus,
+      .editor-textarea:focus-visible {
+        outline: none;
       }
 
       .editor-line-overlay {
-        position: absolute;
-        left: 0;
-        width: 0;
-        height: 0;
-        display: none;
-        pointer-events: none;
-        border-radius: 6px;
-        z-index: 3;
+        z-index: 1;
       }
 
       .editor-line-overlay.mode-b {
@@ -496,7 +503,8 @@
       }
 
       .editor-status {
-        margin: 0;
+        margin: 0 auto;
+        width: min(840px, 100%);
       }
 
       .settings-modal {
@@ -772,8 +780,12 @@
           min-height: 220px;
         }
 
-        .editor-textarea {
+        .editor-textarea-wrap {
           min-height: 45vh;
+        }
+
+        .editor-textarea {
+          min-height: calc(45vh - 2px);
         }
       }
     </style>
