@@ -5,21 +5,31 @@
   "main": "electron/main.js",
   "license": "MIT",
   "scripts": {
+    "generate:ipc": "node scripts/generate-ipc-channels.cjs",
+    "predev": "npm run generate:ipc",
     "dev": "cross-env CAMPUSDOC_DEV=1 electron .",
+    "prestart": "npm run generate:ipc",
     "start": "electron .",
+    "pretest": "npm run generate:ipc",
     "test": "vitest run --globals",
+    "pretest:watch": "npm run generate:ipc",
     "test:watch": "vitest --globals",
+    "predist": "npm run generate:ipc",
     "dist": "electron-builder --publish never",
+    "predist:win": "npm run generate:ipc",
     "dist:win": "electron-builder --win portable --publish never",
+    "predist:mac": "npm run generate:ipc",
     "dist:mac": "electron-builder --mac dmg --publish never"
   },
   "engines": {
     "node": "24.x"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
     "cross-env": "^10.1.0",
     "electron": "^41.2.0",
     "electron-builder": "^26.8.1",
+    "jsdom": "^29.0.2",
     "vitest": "^4.1.3"
   },
   "build": {
@@ -30,8 +40,9 @@
       "output": "dist"
     },
     "files": [
-      "app.js",
       "index.html",
+      "styles/**/*",
+      "renderer/**/*",
       "electron/**/*",
       "package.json"
     ],

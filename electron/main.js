@@ -5,15 +5,7 @@ const path = require("node:path");
 const { DocRepository, sanitizeTitle } = require("./backend/doc-repository");
 const { DocumentService } = require("./backend/document-service");
 const { TxtExporter, TxtImporter } = require("./backend/formats/txt");
-
-const IPC_CHANNELS = {
-  listDocs: "campusdoc:list-docs",
-  importTxt: "campusdoc:import-txt",
-  createDoc: "campusdoc:create-doc",
-  readDoc: "campusdoc:read-doc",
-  saveDoc: "campusdoc:save-doc",
-  exportTxt: "campusdoc:export-txt",
-};
+const { IPC_CHANNELS } = require("./shared/ipc-channels");
 
 let mainWindow = null;
 let documentService = null;
@@ -42,13 +34,14 @@ function watchRendererFilesForDev() {
     return;
   }
 
-  const rendererFiles = [
+  const rendererWatchTargets = [
     path.join(__dirname, "..", "index.html"),
-    path.join(__dirname, "..", "app.js"),
+    path.join(__dirname, "..", "styles"),
+    path.join(__dirname, "..", "renderer"),
   ];
 
-  const watchers = rendererFiles.map((filePath) => {
-    return fs.watch(filePath, () => {
+  const watchers = rendererWatchTargets.map((targetPath) => {
+    return fs.watch(targetPath, { recursive: true }, () => {
       if (!mainWindow || mainWindow.isDestroyed()) {
         return;
       }
