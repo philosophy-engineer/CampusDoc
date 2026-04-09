@@ -17,7 +17,7 @@ export function renderError({ appRoot, renderScreen, bindTopbarActions, escapeHt
     `
       <h1>${escapeHtml(title)}</h1>
       <p class="muted">${escapeHtml(message)}</p>
-      <p><a class="button" href="#/start">시작 화면으로</a></p>
+      <p><a class="button" href="#/browse">최근 파일로</a></p>
     `,
     {
       screenClass: "error-screen",

@@ -4,8 +4,15 @@ import { createSettingsModalController } from "./settings/modal.js";
 import { bindTopbarActions, renderScreen } from "./ui/layout.js";
 import { renderDesktopList } from "./screens/browse.js";
 import { renderDesktopEditor } from "./screens/editor.js";
-import { renderElectronOnlyNotice, renderError, renderLoading, renderStartHome } from "./screens/basic.js";
-import { escapeHtml, formatDateTimeForDisplay, isLikelyDocId } from "./utils/common.js";
+import { renderElectronOnlyNotice, renderError, renderLoading } from "./screens/basic.js";
+import { escapeHtml, formatDateTimeForDisplay } from "./utils/common.js";
+
+function normalizeHash(hash) {
+  if (!hash || hash === "#" || hash === "#/" || hash === "#/start" || hash === "#/study" || hash === "#/records") {
+    return "#/browse";
+  }
+  return hash;
+}
 
 export function startApp() {
   const appRoot = document.getElementById("app");
@@ -22,13 +29,16 @@ export function startApp() {
     escapeHtml,
   });
 
-  let screenCleanup = null;
+  let screenSession = null;
+  let activeHash = "";
+  let isNavigating = false;
+  let suppressNextHashChange = false;
 
   function teardownScreenSession() {
-    if (typeof screenCleanup === "function") {
-      screenCleanup();
+    if (screenSession && typeof screenSession.cleanup === "function") {
+      screenSession.cleanup();
     }
-    screenCleanup = null;
+    screenSession = null;
   }
 
   const uiContext = {
@@ -39,11 +49,34 @@ export function startApp() {
     formatDateTimeForDisplay,
     filesApi,
     settingsStore,
-    renderRoute,
+    renderRoute: (hash) => handleNavigation(hash || window.location.hash),
     renderError: (title, message) => renderError(uiContext, title, message),
   };
 
-  async function renderRoute() {
+  const setHashWithoutLoop = (nextHash) => {
+    if (window.location.hash === nextHash) {
+      return;
+    }
+    suppressNextHashChange = true;
+    window.location.hash = nextHash;
+  };
+
+  const canLeaveCurrentEditor = async () => {
+    if (!screenSession || typeof screenSession.isDirty !== "function" || !screenSession.isDirty()) {
+      return true;
+    }
+
+    const decision = await filesApi.confirmUnsavedChanges(screenSession.getTitle?.() || "Untitled");
+    if (decision?.action === "save") {
+      return screenSession.save();
+    }
+    if (decision?.action === "discard") {
+      return true;
+    }
+    return false;
+  };
+
+  async function renderRouteForHash(hash) {
     teardownScreenSession();
 
     if (!isElectronDesktop) {
@@ -51,58 +84,109 @@ export function startApp() {
       return;
     }
 
-    const route = routeFromHash();
-
-    if (route.type === "legacy_redirect") {
-      window.location.hash = "#/start";
-      return;
-    }
-
+    const route = routeFromHash(hash);
     if (route.type === "invalid") {
-      renderError(uiContext, "잘못된 경로입니다.", "시작 화면으로 이동해 주세요.");
-      return;
-    }
-
-    if (route.type === "start") {
-      renderStartHome(uiContext);
+      renderError(uiContext, "잘못된 경로입니다.", "최근 파일 화면으로 이동해 주세요.");
       return;
     }
 
     if (route.type === "browse") {
-      renderLoading(uiContext, "문서 목록을 불러오는 중...");
+      renderLoading(uiContext, "최근 파일 목록을 불러오는 중...");
       try {
-        const docs = await filesApi.listDocs();
-        renderDesktopList(uiContext, docs);
+        let recent = await filesApi.listRecentFiles();
+        if (recent.missing.length > 0) {
+          const shouldCleanup = window.confirm(
+            `없는 최근 파일 ${recent.missing.length}개가 있습니다. 목록에서 정리할까요?`
+          );
+          if (shouldCleanup) {
+            await filesApi.removeRecentMissing(recent.missing);
+            recent = await filesApi.listRecentFiles();
+          }
+        }
+        renderDesktopList(uiContext, recent.existing);
       } catch (error) {
-        renderError(uiContext, "문서 목록 로딩 실패", error.message || "문서 목록을 가져오지 못했습니다.");
+        renderError(uiContext, "최근 파일 로딩 실패", error.message || "최근 파일 목록을 가져오지 못했습니다.");
       }
       return;
     }
 
-    if (!isLikelyDocId(route.name)) {
-      renderError(uiContext, "잘못된 문서 ID입니다.", "문서 목록으로 돌아가 다시 선택해 주세요.");
+    if (route.type === "new") {
+      renderLoading(uiContext, "새 파일을 준비하는 중...");
+      try {
+        const untitled = await filesApi.createUntitled();
+        screenSession = renderDesktopEditor(uiContext, untitled.meta, untitled.content);
+      } catch (error) {
+        renderError(uiContext, "새 파일 생성 실패", error.message || "새 파일 편집기를 열 수 없습니다.");
+      }
       return;
     }
 
-    renderLoading(uiContext, "문서를 여는 중...");
+    renderLoading(uiContext, "파일을 여는 중...");
     try {
-      const result = await filesApi.readDoc(route.name);
-      screenCleanup = renderDesktopEditor(uiContext, result.meta, result.content);
+      const result = await filesApi.openFileByPath(route.filePath);
+      screenSession = renderDesktopEditor(uiContext, result.meta, result.content);
     } catch (error) {
-      renderError(uiContext, "문서 열기 실패", error.message || "문서를 열 수 없습니다.");
+      if (error?.code === "NOT_SUPPORTED_FORMAT") {
+        renderError(
+          uiContext,
+          "포맷 준비 중",
+          `${String(error.format || "unknown").toUpperCase()} 포맷 ${error.action || "작업"}은 아직 준비 중입니다.`
+        );
+        return;
+      }
+      renderError(uiContext, "파일 열기 실패", error.message || "파일을 열 수 없습니다.");
     }
   }
 
-  window.addEventListener("hashchange", renderRoute);
+  async function handleNavigation(nextHash) {
+    const normalizedHash = normalizeHash(nextHash);
+    if (isNavigating) {
+      return;
+    }
+
+    isNavigating = true;
+    try {
+      const movingToNewRoute = Boolean(activeHash) && normalizedHash !== activeHash;
+      if (movingToNewRoute) {
+        const canLeave = await canLeaveCurrentEditor();
+        if (!canLeave) {
+          setHashWithoutLoop(activeHash);
+          return;
+        }
+      }
+
+      await renderRouteForHash(normalizedHash);
+      activeHash = normalizedHash;
+      setHashWithoutLoop(normalizedHash);
+    } finally {
+      isNavigating = false;
+    }
+  }
+
+  window.addEventListener("hashchange", () => {
+    if (suppressNextHashChange) {
+      suppressNextHashChange = false;
+      return;
+    }
+    handleNavigation(window.location.hash);
+  });
+
+  window.addEventListener("beforeunload", (event) => {
+    if (!screenSession || typeof screenSession.isDirty !== "function" || !screenSession.isDirty()) {
+      return;
+    }
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
   window.addEventListener("DOMContentLoaded", () => {
     settingsStore.applyTheme(settingsStore.getTheme());
     settingsModal.ensure();
 
-    if (!window.location.hash || window.location.hash === "#/" || window.location.hash === "#") {
-      window.location.hash = "#/start";
-      return;
+    const initialHash = normalizeHash(window.location.hash);
+    if (window.location.hash !== initialHash) {
+      setHashWithoutLoop(initialHash);
     }
-
-    renderRoute();
+    handleNavigation(initialHash);
   });
 }
