@@ -884,11 +884,14 @@ function createEditorModeController(editor, overlay) {
     const textRight = textRect.right - surfaceRect.left + surface.scrollLeft;
     const isCollapsedRange = Boolean(range.collapsed);
     const isBlankLineCaret = isCollapsedCaretOnBlankLine(range);
+    if (condition === "D" && isCollapsedRange && isBlankLineCaret) {
+      // In D mode, a caret on a blank line should not render any background overlay.
+      hideOverlay();
+      return false;
+    }
     const hasCaretOnlyRect = Boolean(directRect && directRect.height > 0 && directRect.width < 1 && rect.width < 1);
-    const shouldUseCaretOnlyOverlay =
-      condition === "D" && isCollapsedRange && isBlankLineCaret && directRect && directRect.height > 0 && directRect.width <= 1;
 
-    if (condition === "D" && (shouldUseCaretOnlyOverlay || hasCaretOnlyRect)) {
+    if (condition === "D" && hasCaretOnlyRect) {
       const caretX = lineState.anchorX ?? directRect.left;
       const height = directRect.height || lineState.lineHeight;
       const top = directRect.top - surfaceRect.top + surface.scrollTop;
