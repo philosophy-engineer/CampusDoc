@@ -11,6 +11,14 @@ import {
   setSelectionAtRange,
 } from "./selection.js";
 
+const SCROLL_TARGET = Object.freeze({
+  SURFACE: "surface",
+  WINDOW: "window",
+});
+
+const USER_SCROLL_INTENT_EVENTS = Object.freeze(["wheel", "touchmove"]);
+const D_MODE_SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", " ", "Spacebar"]);
+
 export function createEditorModeController(
   editor,
   overlay,
@@ -25,6 +33,15 @@ export function createEditorModeController(
   let rafId = 0;
   let autoScrollRafId = 0;
   let overlaySuppressedByTyping = false;
+  let dFollowSuspendedByUser = false;
+  const programmaticScrollGuard = {
+    [SCROLL_TARGET.SURFACE]: false,
+    [SCROLL_TARGET.WINDOW]: false,
+  };
+  const programmaticScrollGuardResetRafId = {
+    [SCROLL_TARGET.SURFACE]: 0,
+    [SCROLL_TARGET.WINDOW]: 0,
+  };
   let lastRevealCause = "none";
   const lineState = {
     anchorX: null,
@@ -82,7 +99,11 @@ export function createEditorModeController(
       const before = surface.scrollTop;
       const maxTop = Math.max(0, surface.scrollHeight - surface.clientHeight);
       surface.scrollTop = Math.max(0, Math.min(maxTop, before + delta));
-      return surface.scrollTop - before;
+      const moved = surface.scrollTop - before;
+      if (Math.abs(moved) >= 0.01) {
+        markProgrammaticScrollGuard(SCROLL_TARGET.SURFACE);
+      }
+      return moved;
     }
 
     const scroller = document.scrollingElement || document.documentElement;
@@ -90,7 +111,11 @@ export function createEditorModeController(
     const maxTop = Math.max(0, scroller.scrollHeight - window.innerHeight);
     const next = Math.max(0, Math.min(maxTop, before + delta));
     window.scrollTo(0, next);
-    return window.scrollY - before;
+    const moved = window.scrollY - before;
+    if (Math.abs(moved) >= 0.01) {
+      markProgrammaticScrollGuard(SCROLL_TARGET.WINDOW);
+    }
+    return moved;
   }
 
   function getEdgeAutoScrollDelta(position, size, edgeRatio, minSpeed, maxSpeed) {
@@ -135,7 +160,7 @@ export function createEditorModeController(
     if (condition !== "D") {
       return 0;
     }
-    if (overlaySuppressedByTyping || document.activeElement !== editor) {
+    if (overlaySuppressedByTyping || document.activeElement !== editor || dFollowSuspendedByUser) {
       return 0;
     }
 
@@ -194,6 +219,64 @@ export function createEditorModeController(
     if (!autoScrollRafId) {
       autoScrollRafId = requestFrame(runAutoScrollFrame);
     }
+  }
+
+  function suspendDFollowByUserScroll() {
+    if (condition !== "D") {
+      return;
+    }
+    dFollowSuspendedByUser = true;
+    stopAutoScroll();
+  }
+
+  function resumeDFollowByInteraction() {
+    if (condition !== "D") {
+      return;
+    }
+    dFollowSuspendedByUser = false;
+  }
+
+  function clearDFollowSuspension() {
+    dFollowSuspendedByUser = false;
+  }
+
+  function markProgrammaticScrollGuard(target) {
+    programmaticScrollGuard[target] = true;
+    if (programmaticScrollGuardResetRafId[target]) {
+      cancelFrame(programmaticScrollGuardResetRafId[target]);
+    }
+    programmaticScrollGuardResetRafId[target] = requestFrame(() => {
+      programmaticScrollGuard[target] = false;
+      programmaticScrollGuardResetRafId[target] = 0;
+    });
+  }
+
+  function consumeProgrammaticScrollGuard(target) {
+    if (!programmaticScrollGuard[target]) {
+      return false;
+    }
+    programmaticScrollGuard[target] = false;
+    if (programmaticScrollGuardResetRafId[target]) {
+      cancelFrame(programmaticScrollGuardResetRafId[target]);
+      programmaticScrollGuardResetRafId[target] = 0;
+    }
+    return true;
+  }
+
+  function isRectVisibleInScrollContext(rect) {
+    if (!rect || rect.height <= 0) {
+      return false;
+    }
+    const contextRect = getScrollContextRect();
+    return rect.bottom > contextRect.top && rect.top < contextRect.bottom;
+  }
+
+  function handleScrollEvent(target) {
+    if (!consumeProgrammaticScrollGuard(target)) {
+      suspendDFollowByUserScroll();
+    }
+    scheduleRender();
+    refreshAutoScroll();
   }
 
   function showOverlayAtRange(range, preserveOnFail = false) {
@@ -349,6 +432,14 @@ export function createEditorModeController(
       return false;
     }
 
+    if (condition === "D" && dFollowSuspendedByUser) {
+      const rect = getRangeRect(range, lineState.lastClientY ?? 0);
+      if (!isRectVisibleInScrollContext(rect)) {
+        hideOverlay();
+        return false;
+      }
+    }
+
     return showOverlayAtRange(range);
   }
 
@@ -447,8 +538,7 @@ export function createEditorModeController(
     refreshAutoScroll();
   };
   const onScroll = () => {
-    scheduleRender();
-    refreshAutoScroll();
+    handleScrollEvent(SCROLL_TARGET.SURFACE);
   };
   const onFocus = () => {
     scheduleRender();
@@ -458,7 +548,10 @@ export function createEditorModeController(
     scheduleRender();
     refreshAutoScroll();
   };
-  const onPointer = () => {
+  const onPointer = (event) => {
+    if (condition === "D" && event?.type === "click") {
+      resumeDFollowByInteraction();
+    }
     scheduleRender();
     refreshAutoScroll();
   };
@@ -467,8 +560,10 @@ export function createEditorModeController(
     refreshAutoScroll();
   };
   const onWindowScroll = () => {
-    scheduleRender();
-    refreshAutoScroll();
+    handleScrollEvent(SCROLL_TARGET.WINDOW);
+  };
+  const onUserScrollIntent = () => {
+    suspendDFollowByUserScroll();
   };
   const onMouseMove = (event) => {
     pointerState.inside = true;
@@ -511,6 +606,12 @@ export function createEditorModeController(
   const onKeyDown = (event) => {
     const isArrowUp = event.key === "ArrowUp";
     const isArrowDown = event.key === "ArrowDown";
+    const isScrollKey = D_MODE_SCROLL_KEYS.has(event.key);
+    if (condition === "D" && isScrollKey) {
+      suspendDFollowByUserScroll();
+      scheduleRender();
+      refreshAutoScroll();
+    }
     if (!isArrowUp && !isArrowDown) {
       return;
     }
@@ -520,6 +621,7 @@ export function createEditorModeController(
       return;
     }
 
+    resumeDFollowByInteraction();
     event.preventDefault();
     const moved = moveCaretByVisualLine(isArrowUp ? -1 : 1);
     if (moved) {
@@ -530,6 +632,24 @@ export function createEditorModeController(
     scheduleRender();
     refreshAutoScroll();
   };
+
+  const userScrollIntentTargets = [surface, window];
+  const userScrollIntentOptions = { passive: true };
+  function bindUserScrollIntentListeners() {
+    for (const target of userScrollIntentTargets) {
+      for (const eventType of USER_SCROLL_INTENT_EVENTS) {
+        target.addEventListener(eventType, onUserScrollIntent, userScrollIntentOptions);
+      }
+    }
+  }
+
+  function unbindUserScrollIntentListeners() {
+    for (const target of userScrollIntentTargets) {
+      for (const eventType of USER_SCROLL_INTENT_EVENTS) {
+        target.removeEventListener(eventType, onUserScrollIntent, userScrollIntentOptions);
+      }
+    }
+  }
 
   editor.addEventListener("input", onInput);
   surface.addEventListener("scroll", onScroll);
@@ -542,6 +662,7 @@ export function createEditorModeController(
   surface.addEventListener("mousemove", onMouseMove);
   surface.addEventListener("mouseenter", onMouseEnter);
   surface.addEventListener("mouseleave", onMouseLeave);
+  bindUserScrollIntentListeners();
   document.addEventListener("selectionchange", onSelectionChange);
   window.addEventListener("resize", onResize);
   window.addEventListener("scroll", onWindowScroll, { passive: true });
@@ -554,6 +675,9 @@ export function createEditorModeController(
       if (condition === "A") {
         overlaySuppressedByTyping = false;
         lastRevealCause = "none";
+      }
+      if (condition !== "D") {
+        clearDFollowSuspension();
       }
       scheduleRender();
       refreshAutoScroll();
@@ -577,9 +701,16 @@ export function createEditorModeController(
       surface.removeEventListener("mousemove", onMouseMove);
       surface.removeEventListener("mouseenter", onMouseEnter);
       surface.removeEventListener("mouseleave", onMouseLeave);
+      unbindUserScrollIntentListeners();
       document.removeEventListener("selectionchange", onSelectionChange);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", onWindowScroll);
+      if (programmaticScrollGuardResetRafId[SCROLL_TARGET.SURFACE]) {
+        cancelFrame(programmaticScrollGuardResetRafId[SCROLL_TARGET.SURFACE]);
+      }
+      if (programmaticScrollGuardResetRafId[SCROLL_TARGET.WINDOW]) {
+        cancelFrame(programmaticScrollGuardResetRafId[SCROLL_TARGET.WINDOW]);
+      }
       hideOverlay();
     },
   };
