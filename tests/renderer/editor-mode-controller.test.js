@@ -64,6 +64,120 @@ function createFixture() {
   return { surface, overlay, editor, textNode };
 }
 
+function createRafHarness() {
+  let nextId = 1;
+  const callbacks = new Map();
+  return {
+    requestFrame: vi.fn((callback) => {
+      const id = nextId;
+      nextId += 1;
+      callbacks.set(id, callback);
+      return id;
+    }),
+    cancelFrame: vi.fn((id) => {
+      callbacks.delete(id);
+    }),
+    runSteps(maxSteps = 12) {
+      for (let step = 0; step < maxSteps; step += 1) {
+        const iterator = callbacks.entries().next();
+        if (iterator.done) {
+          break;
+        }
+        const [id, callback] = iterator.value;
+        callbacks.delete(id);
+        callback();
+      }
+    },
+  };
+}
+
+function setSurfaceScrollability(surface, scrollHeight, clientHeight) {
+  Object.defineProperty(surface, "scrollHeight", { value: scrollHeight, configurable: true });
+  Object.defineProperty(surface, "clientHeight", { value: clientHeight, configurable: true });
+}
+
+function setSelectionAt(node, offset) {
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.setStart(node, offset);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function mockRangeRect(rect) {
+  vi.spyOn(Range.prototype, "getBoundingClientRect").mockImplementation(() => rect);
+  vi.spyOn(Range.prototype, "getClientRects").mockImplementation(() => [rect]);
+}
+
+function mockSelectionWithModify(textNode, offset = 1) {
+  const selection = {
+    rangeCount: 1,
+    focusNode: textNode,
+    focusOffset: offset,
+    anchorNode: textNode,
+    anchorOffset: offset,
+    modify: vi.fn(),
+    removeAllRanges: vi.fn(),
+    addRange: vi.fn(),
+  };
+  vi.spyOn(window, "getSelection").mockImplementation(() => selection);
+  return selection;
+}
+
+function mockWindowScroll(initialY = 0, scrollHeight = 5000) {
+  Object.defineProperty(window, "scrollY", { value: initialY, writable: true, configurable: true });
+  Object.defineProperty(document.documentElement, "scrollHeight", { value: scrollHeight, configurable: true });
+  vi.spyOn(window, "scrollTo").mockImplementation((_x, y) => {
+    window.scrollY = Number(y) || 0;
+  });
+}
+
+const SCROLL_CONTEXT_CASES = [
+  {
+    name: "window",
+    prepare() {
+      mockWindowScroll();
+    },
+    setManualPosition() {
+      window.scrollY = 180;
+    },
+    dispatchScroll() {
+      window.dispatchEvent(new Event("scroll"));
+    },
+    setNearEdgeRect() {
+      mockRangeRect(createRect({ left: 120, top: window.innerHeight - 8, width: 1, height: 22 }));
+    },
+    getScrollPosition() {
+      return window.scrollY;
+    },
+    expectProgrammaticStartMoved() {
+      expect(window.scrollY).toBeGreaterThan(0);
+    },
+  },
+  {
+    name: "surface",
+    prepare(surface) {
+      setSurfaceScrollability(surface, 1200, 200);
+    },
+    setManualPosition(surface) {
+      surface.scrollTop = 160;
+    },
+    dispatchScroll(surface) {
+      surface.dispatchEvent(new Event("scroll"));
+    },
+    setNearEdgeRect() {
+      mockRangeRect(createRect({ left: 120, top: 208, width: 1, height: 22 }));
+    },
+    getScrollPosition(surface) {
+      return surface.scrollTop;
+    },
+    expectProgrammaticStartMoved(surface) {
+      expect(surface.scrollTop).toBeGreaterThan(0);
+    },
+  },
+];
+
 afterEach(() => {
   vi.restoreAllMocks();
   delete document.caretRangeFromPoint;
@@ -173,6 +287,206 @@ describe("createEditorModeController", () => {
     expect(selection.modify).toHaveBeenCalledWith("move", "forward", "line");
     expect(event.defaultPrevented).toBe(true);
 
+    controller.destroy();
+  });
+
+  describe.each(SCROLL_CONTEXT_CASES)("D 모드 스크롤 컨텍스트: $name", (contextCase) => {
+    it("수동 스크롤 후 자동 추적을 재시작하지 않는다", () => {
+      const { surface, overlay, editor, textNode } = createFixture();
+      const raf = createRafHarness();
+      contextCase.prepare(surface);
+      setSelectionAt(textNode, 1);
+      mockRangeRect(createRect({ left: 120, top: 80, width: 1, height: 22 }));
+
+      const controller = createEditorModeController(editor, overlay, {
+        getCondition: () => "D",
+        requestFrame: raf.requestFrame,
+        cancelFrame: raf.cancelFrame,
+      });
+
+      editor.focus();
+      contextCase.setManualPosition(surface);
+      contextCase.dispatchScroll(surface);
+      contextCase.setNearEdgeRect();
+
+      document.dispatchEvent(new Event("selectionchange"));
+      const before = contextCase.getScrollPosition(surface);
+      raf.runSteps(10);
+
+      expect(contextCase.getScrollPosition(surface)).toBe(before);
+      controller.destroy();
+    });
+
+    it("프로그램 스크롤 이벤트는 수동 스크롤로 오인되지 않는다", () => {
+      const { surface, overlay, editor, textNode } = createFixture();
+      const raf = createRafHarness();
+      contextCase.prepare(surface);
+      contextCase.setNearEdgeRect();
+      mockSelectionWithModify(textNode, 1);
+
+      const controller = createEditorModeController(editor, overlay, {
+        getCondition: () => "D",
+        requestFrame: raf.requestFrame,
+        cancelFrame: raf.cancelFrame,
+      });
+
+      editor.focus();
+      editor.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+      contextCase.expectProgrammaticStartMoved(surface);
+
+      contextCase.dispatchScroll(surface);
+      const before = contextCase.getScrollPosition(surface);
+      document.dispatchEvent(new Event("selectionchange"));
+      raf.runSteps(10);
+
+      expect(contextCase.getScrollPosition(surface)).toBeGreaterThan(before);
+      controller.destroy();
+    });
+  });
+
+  it("중단 상태에서 ArrowDown 입력으로 자동 추적을 재개한다", () => {
+    const { overlay, editor, textNode } = createFixture();
+    const raf = createRafHarness();
+    mockWindowScroll();
+    mockRangeRect(createRect({ left: 120, top: 80, width: 1, height: 22 }));
+    mockSelectionWithModify(textNode, 1);
+
+    const controller = createEditorModeController(editor, overlay, {
+      getCondition: () => "D",
+      requestFrame: raf.requestFrame,
+      cancelFrame: raf.cancelFrame,
+    });
+
+    editor.focus();
+    window.scrollY = 200;
+    window.dispatchEvent(new Event("scroll"));
+    mockRangeRect(createRect({ left: 120, top: window.innerHeight - 8, width: 1, height: 22 }));
+
+    document.dispatchEvent(new Event("selectionchange"));
+    raf.runSteps(8);
+    const paused = window.scrollY;
+    expect(window.scrollY).toBe(paused);
+
+    editor.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    const afterKeydown = window.scrollY;
+    raf.runSteps(8);
+
+    expect(window.scrollY).toBeGreaterThan(afterKeydown);
+    controller.destroy();
+  });
+
+  it("중단 상태에서 클릭 입력으로 자동 추적을 재개한다", () => {
+    const { surface, overlay, editor, textNode } = createFixture();
+    const raf = createRafHarness();
+    setSurfaceScrollability(surface, 1200, 200);
+    setSelectionAt(textNode, 1);
+    mockRangeRect(createRect({ left: 120, top: 80, width: 1, height: 22 }));
+
+    const controller = createEditorModeController(editor, overlay, {
+      getCondition: () => "D",
+      requestFrame: raf.requestFrame,
+      cancelFrame: raf.cancelFrame,
+    });
+
+    editor.focus();
+    surface.scrollTop = 140;
+    surface.dispatchEvent(new Event("scroll"));
+    mockRangeRect(createRect({ left: 120, top: 208, width: 1, height: 22 }));
+
+    document.dispatchEvent(new Event("selectionchange"));
+    raf.runSteps(8);
+    const paused = surface.scrollTop;
+    expect(surface.scrollTop).toBe(paused);
+
+    editor.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const afterClick = surface.scrollTop;
+    raf.runSteps(8);
+
+    expect(surface.scrollTop).toBeGreaterThan(afterClick);
+    controller.destroy();
+  });
+
+  it("중단 상태에서 커서 줄이 화면 밖이면 오버레이를 숨긴다", () => {
+    const { surface, overlay, editor, textNode } = createFixture();
+    const raf = createRafHarness();
+    setSurfaceScrollability(surface, 1200, 200);
+    setSelectionAt(textNode, 1);
+
+    const controller = createEditorModeController(editor, overlay, {
+      getCondition: () => "D",
+      requestFrame: raf.requestFrame,
+      cancelFrame: raf.cancelFrame,
+    });
+
+    const visible = createCollapsedRange(textNode, 1, createRect({ left: 120, top: 80, width: 8, height: 22 }));
+    controller.renderForRange(visible);
+    expect(overlay.style.display).toBe("block");
+
+    editor.focus();
+    surface.scrollTop = 140;
+    surface.dispatchEvent(new Event("scroll"));
+    mockRangeRect(createRect({ left: 120, top: -120, width: 1, height: 22 }));
+
+    document.dispatchEvent(new Event("selectionchange"));
+    raf.runSteps(8);
+
+    expect(overlay.style.display).toBe("none");
+    controller.destroy();
+  });
+
+  it("wheel 의도 입력만으로도 D 모드 자동 추적을 즉시 중단한다", () => {
+    const { overlay, editor, textNode } = createFixture();
+    const raf = createRafHarness();
+    mockWindowScroll();
+    setSelectionAt(textNode, 1);
+    mockRangeRect(createRect({ left: 120, top: window.innerHeight - 8, width: 1, height: 22 }));
+
+    const controller = createEditorModeController(editor, overlay, {
+      getCondition: () => "D",
+      requestFrame: raf.requestFrame,
+      cancelFrame: raf.cancelFrame,
+    });
+
+    editor.focus();
+    document.dispatchEvent(new Event("selectionchange"));
+    raf.runSteps(6);
+
+    window.dispatchEvent(new WheelEvent("wheel", { deltaY: 120 }));
+    const before = window.scrollY;
+    document.dispatchEvent(new Event("selectionchange"));
+    raf.runSteps(10);
+
+    expect(window.scrollY).toBe(before);
+    controller.destroy();
+  });
+
+  it("프로그램 스크롤 가드가 다음 프레임에 해제되어 이후 사용자 스크롤을 정상 감지한다", () => {
+    const { overlay, editor, textNode } = createFixture();
+    const raf = createRafHarness();
+    mockWindowScroll();
+    mockRangeRect(createRect({ left: 120, top: window.innerHeight - 8, width: 1, height: 22 }));
+    mockSelectionWithModify(textNode, 1);
+
+    const controller = createEditorModeController(editor, overlay, {
+      getCondition: () => "D",
+      requestFrame: raf.requestFrame,
+      cancelFrame: raf.cancelFrame,
+    });
+
+    editor.focus();
+    editor.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    expect(window.scrollY).toBeGreaterThan(0);
+
+    // scroll 이벤트가 없더라도 가드가 프레임 경계에서 해제되어야 한다.
+    raf.runSteps(4);
+
+    window.scrollY = 220;
+    window.dispatchEvent(new Event("scroll"));
+    const before = window.scrollY;
+    document.dispatchEvent(new Event("selectionchange"));
+    raf.runSteps(10);
+
+    expect(window.scrollY).toBe(before);
     controller.destroy();
   });
 });
