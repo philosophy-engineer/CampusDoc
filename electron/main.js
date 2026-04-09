@@ -2,31 +2,78 @@ const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { DocRepository, sanitizeTitle } = require("./backend/doc-repository");
-const { DocumentService } = require("./backend/document-service");
-const { TxtExporter, TxtImporter } = require("./backend/formats/txt");
+const { DocumentService, sanitizeTitle } = require("./backend/document-service");
+const { FormatRegistry } = require("./backend/format-registry");
+const { NotSupportedFormatAdapter } = require("./backend/formats/not-supported");
+const { ensureTxtPath, TxtFormatAdapter } = require("./backend/formats/txt");
 const { IPC_CHANNELS } = require("./shared/ipc-channels");
 
 let mainWindow = null;
 let documentService = null;
+let formatRegistry = null;
 let handlersRegistered = false;
 
 function toPublicError(error) {
-  if (error instanceof Error) {
-    return new Error(error.message);
+  if (!(error instanceof Error)) {
+    return new Error("요청 처리 중 오류가 발생했습니다.");
   }
-  return new Error("요청 처리 중 오류가 발생했습니다.");
+
+  const publicError = new Error(error.message);
+  if (error.code) {
+    publicError.code = error.code;
+  }
+  if (error.format) {
+    publicError.format = error.format;
+  }
+  if (error.action) {
+    publicError.action = error.action;
+  }
+  return publicError;
+}
+
+function createFormatRegistry() {
+  return new FormatRegistry([
+    new TxtFormatAdapter(),
+    new NotSupportedFormatAdapter("docx", ["docx"]),
+    new NotSupportedFormatAdapter("hwp", ["hwp"]),
+    new NotSupportedFormatAdapter("pptx", ["pptx"]),
+    new NotSupportedFormatAdapter("pdf", ["pdf"]),
+  ]);
 }
 
 function createDocumentService() {
-  const workspaceDir = path.join(app.getPath("userData"), "workspace");
-  const repository = new DocRepository({ workspaceDir });
-
   return new DocumentService({
-    repository,
-    importers: [new TxtImporter(repository)],
-    exporters: [new TxtExporter(repository)],
+    userDataDir: app.getPath("userData"),
+    formatRegistry,
   });
+}
+
+function getSuggestedFileName(baseName, extension) {
+  const safeTitle = sanitizeTitle(baseName || "Untitled");
+  return `${safeTitle}.${String(extension || "txt").toLowerCase()}`;
+}
+
+async function askSaveTargetPath({ suggestedName, targetFormat = "txt" }) {
+  const extension = String(targetFormat || "txt").toLowerCase();
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: `${extension.toUpperCase()} 파일 저장`,
+    defaultPath: path.join(app.getPath("documents"), getSuggestedFileName(suggestedName, extension)),
+    filters: [{ name: "Document Files", extensions: [extension] }],
+  });
+
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+
+  if (extension === "txt") {
+    return ensureTxtPath(result.filePath);
+  }
+
+  const resolved = path.resolve(result.filePath);
+  if (path.extname(resolved).replace(".", "").toLowerCase() === extension) {
+    return resolved;
+  }
+  return `${resolved}.${extension}`;
 }
 
 function watchRendererFilesForDev() {
@@ -69,63 +116,111 @@ function registerIpcHandlers() {
     });
   };
 
-  register(IPC_CHANNELS.listDocs, async () => {
-    return documentService.listDocs();
+  register(IPC_CHANNELS.listRecentFiles, async () => {
+    return documentService.listRecentFiles();
   });
 
-  register(IPC_CHANNELS.importTxt, async () => {
+  register(IPC_CHANNELS.removeRecentMissing, async ({ paths }) => {
+    return documentService.removeRecentMissing(paths);
+  });
+
+  const openFileDialogHandler = async () => {
+    const extensions = formatRegistry.getOpenDialogExtensions();
     const selection = await dialog.showOpenDialog(mainWindow, {
       properties: ["openFile"],
-      filters: [{ name: "Text Files", extensions: ["txt"] }],
-      title: "TXT 파일 가져오기",
+      filters: [{ name: "Document Files", extensions: extensions.length > 0 ? extensions : ["txt"] }],
+      title: "파일 열기",
     });
 
     if (selection.canceled || selection.filePaths.length === 0) {
       return null;
     }
 
-    return documentService.importFile({
-      format: "txt",
-      sourcePath: selection.filePaths[0],
-    });
+    return {
+      filePath: path.resolve(selection.filePaths[0]),
+    };
+  };
+
+  register(IPC_CHANNELS.openFileDialog, openFileDialogHandler);
+
+  register(IPC_CHANNELS.openFileByPath, async ({ filePath }) => {
+    return documentService.openFileByPath(filePath);
   });
 
-  register(IPC_CHANNELS.createDoc, async ({ title }) => {
-    return documentService.createDoc(title);
+  // Deprecated aliases for one release
+  register(IPC_CHANNELS.openTxtDialog, openFileDialogHandler);
+
+  register(IPC_CHANNELS.openTxtByPath, async ({ filePath }) => {
+    return documentService.openFileByPath(filePath);
   });
 
-  register(IPC_CHANNELS.readDoc, async ({ docId }) => {
-    return documentService.readDoc(docId);
+  register(IPC_CHANNELS.createUntitled, async () => {
+    return documentService.createUntitled();
   });
 
-  register(IPC_CHANNELS.saveDoc, async ({ docId, content }) => {
-    return documentService.saveDoc(docId, content);
-  });
-
-  register(IPC_CHANNELS.exportTxt, async ({ docId }) => {
-    const meta = await documentService.getDocMeta(docId);
-    const suggestedName = `${sanitizeTitle(meta.title)}.txt`;
-
-    const result = await dialog.showSaveDialog(mainWindow, {
-      title: "TXT 파일 내보내기",
-      defaultPath: path.join(app.getPath("documents"), suggestedName),
-      filters: [{ name: "Text Files", extensions: ["txt"] }],
-    });
-
-    if (result.canceled || !result.filePath) {
-      return null;
+  register(IPC_CHANNELS.saveCurrent, async ({ filePath, content, sourceFormat, suggestedName }) => {
+    if (typeof filePath === "string" && filePath.trim()) {
+      return documentService.saveCurrent({ filePath, content, sourceFormat });
     }
 
-    let outputPath = result.filePath;
-    if (path.extname(outputPath).toLowerCase() !== ".txt") {
-      outputPath = `${outputPath}.txt`;
+    const outputPath = await askSaveTargetPath({ suggestedName, targetFormat: sourceFormat || "txt" });
+    if (!outputPath) {
+      return { canceled: true };
     }
 
-    return documentService.exportFile({
-      format: "txt",
-      docId,
+    return documentService.saveAs({
       outputPath,
+      content,
+      sourceFormat: sourceFormat || "txt",
     });
+  });
+
+  register(IPC_CHANNELS.saveAs, async ({ content, sourceFormat, suggestedName }) => {
+    const outputPath = await askSaveTargetPath({ suggestedName, targetFormat: sourceFormat || "txt" });
+    if (!outputPath) {
+      return { canceled: true };
+    }
+
+    return documentService.saveAs({
+      outputPath,
+      content,
+      sourceFormat: sourceFormat || "txt",
+    });
+  });
+
+  register(IPC_CHANNELS.exportDocument, async ({ targetFormat, content, sourceFilePath, suggestedName }) => {
+    const outputPath = await askSaveTargetPath({ suggestedName, targetFormat: targetFormat || "txt" });
+    if (!outputPath) {
+      return { canceled: true };
+    }
+
+    return documentService.exportDocument({
+      sourceFilePath,
+      targetFormat: targetFormat || "txt",
+      outputPath,
+      content,
+    });
+  });
+
+  register(IPC_CHANNELS.confirmUnsavedChanges, async ({ title }) => {
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: "question",
+      buttons: ["저장", "버리기", "취소"],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+      title: "저장되지 않은 변경 사항",
+      message: "저장되지 않은 변경 사항이 있습니다.",
+      detail: `문서: ${sanitizeTitle(title || "Untitled")}`,
+    });
+
+    if (result.response === 0) {
+      return { action: "save" };
+    }
+    if (result.response === 1) {
+      return { action: "discard" };
+    }
+    return { action: "cancel" };
   });
 
   handlersRegistered = true;
@@ -161,6 +256,7 @@ async function createMainWindow() {
 
 app.whenReady().then(async () => {
   app.setName("CampusDoc");
+  formatRegistry = createFormatRegistry();
   documentService = createDocumentService();
   registerIpcHandlers();
   await createMainWindow();

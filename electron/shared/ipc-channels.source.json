@@ -1,8 +1,13 @@
 {
-  "listDocs": "campusdoc:list-docs",
-  "importTxt": "campusdoc:import-txt",
-  "createDoc": "campusdoc:create-doc",
-  "readDoc": "campusdoc:read-doc",
-  "saveDoc": "campusdoc:save-doc",
-  "exportTxt": "campusdoc:export-txt"
+  "listRecentFiles": "campusdoc:list-recent-files",
+  "removeRecentMissing": "campusdoc:remove-recent-missing",
+  "openFileDialog": "campusdoc:open-file-dialog",
+  "openFileByPath": "campusdoc:open-file-by-path",
+  "openTxtDialog": "campusdoc:open-txt-dialog",
+  "openTxtByPath": "campusdoc:open-txt-by-path",
+  "createUntitled": "campusdoc:create-untitled",
+  "saveCurrent": "campusdoc:save-current",
+  "saveAs": "campusdoc:save-as",
+  "exportDocument": "campusdoc:export-document",
+  "confirmUnsavedChanges": "campusdoc:confirm-unsaved-changes"
 }
